@@ -2,9 +2,11 @@ package com.smartpark.repository;
 
 import com.smartpark.entity.Booking;
 import com.smartpark.entity.BookingStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -16,6 +18,23 @@ import java.util.Optional;
 
 @Repository
 public interface BookingRepository extends JpaRepository<Booking, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM Booking b WHERE b.id = :id")
+    Optional<Booking> findByIdWithLock(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        SELECT b FROM Booking b
+        WHERE (b.status = :confirmedStatus AND b.endTime <= :now)
+           OR (b.status = :pendingStatus AND (b.startTime <= :now OR b.endTime <= :now))
+        ORDER BY b.endTime ASC
+    """)
+    List<Booking> findEligibleForExpiryWithLock(
+            @Param("now") Instant now,
+            @Param("confirmedStatus") BookingStatus confirmedStatus,
+            @Param("pendingStatus") BookingStatus pendingStatus
+    );
 
     List<Booking> findByUserId(Long userId);
 
@@ -45,3 +64,4 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             @Param("activeStatuses") Collection<BookingStatus> activeStatuses
     );
 }
+

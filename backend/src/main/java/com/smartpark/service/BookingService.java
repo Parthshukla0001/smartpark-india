@@ -11,6 +11,8 @@ import com.smartpark.repository.ParkingSlotRepository;
 import com.smartpark.repository.VehicleRepository;
 import com.smartpark.security.service.CurrentUserService;
 import com.smartpark.security.service.SecurityAuditLogger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -42,6 +44,25 @@ public class BookingService {
     private final CurrentUserService currentUserService;
     private final SecurityAuditLogger auditLogger;
     private final Clock clock;
+    private final int cancellationCutoffMinutes;
+
+    @Autowired
+    public BookingService(BookingRepository bookingRepository,
+                          VehicleRepository vehicleRepository,
+
+                          ParkingSlotRepository parkingSlotRepository,
+                          CurrentUserService currentUserService,
+                          SecurityAuditLogger auditLogger,
+                          Clock clock,
+                          @Value("${smartpark.booking.cancellation-cutoff-minutes:15}") int cancellationCutoffMinutes) {
+        this.bookingRepository = bookingRepository;
+        this.vehicleRepository = vehicleRepository;
+        this.parkingSlotRepository = parkingSlotRepository;
+        this.currentUserService = currentUserService;
+        this.auditLogger = auditLogger;
+        this.clock = clock;
+        this.cancellationCutoffMinutes = cancellationCutoffMinutes;
+    }
 
     public BookingService(BookingRepository bookingRepository,
                           VehicleRepository vehicleRepository,
@@ -49,13 +70,9 @@ public class BookingService {
                           CurrentUserService currentUserService,
                           SecurityAuditLogger auditLogger,
                           Clock clock) {
-        this.bookingRepository = bookingRepository;
-        this.vehicleRepository = vehicleRepository;
-        this.parkingSlotRepository = parkingSlotRepository;
-        this.currentUserService = currentUserService;
-        this.auditLogger = auditLogger;
-        this.clock = clock;
+        this(bookingRepository, vehicleRepository, parkingSlotRepository, currentUserService, auditLogger, clock, 15);
     }
+
 
     @Transactional
     public BookingResponse createBooking(CreateBookingRequest request) {
@@ -178,10 +195,16 @@ public class BookingService {
 
     public BookingResponse getBookingById(Long id) {
         User currentUser = currentUserService.getCurrentUserEntity();
+        boolean isDriver = currentUser.getRole().getName() == RoleType.DRIVER;
 
-        // Enforce ownership: query directly filters by booking ID and current user ID
-        Booking booking = bookingRepository.findByIdAndUserId(id, currentUser.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
+        Booking booking;
+        if (isDriver) {
+            booking = bookingRepository.findByIdAndUserId(id, currentUser.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
+        } else {
+            booking = bookingRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
+        }
 
         return BookingResponse.fromEntity(booking);
     }
@@ -189,26 +212,149 @@ public class BookingService {
     @Transactional
     public BookingResponse cancelBooking(Long id) {
         User currentUser = currentUserService.getCurrentUserEntity();
+        boolean isDriver = currentUser.getRole().getName() == RoleType.DRIVER;
 
-        Booking booking = bookingRepository.findByIdAndUserId(id, currentUser.getId())
+        // 1. Acquire row-level lock to prevent concurrent race conditions
+        Booking booking = bookingRepository.findByIdWithLock(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
 
-        // Strict lifecycle transition: only CONFIRMED bookings may be cancelled
+        // 2. Ownership check: Driver can only cancel their own booking (return 404 to avoid ID enumeration)
+        if (isDriver && !booking.getUser().getId().equals(currentUser.getId())) {
+            throw new ResourceNotFoundException("Booking not found with id: " + id);
+        }
+
+        // 3. Strict lifecycle validation: terminal states cannot be cancelled
         if (booking.getStatus() == BookingStatus.CANCELLED) {
             throw new IllegalArgumentException("Booking is already cancelled");
         }
-        if (booking.getStatus() == BookingStatus.COMPLETED || booking.getStatus() == BookingStatus.EXPIRED) {
+        if (booking.getStatus() == BookingStatus.COMPLETED) {
+            throw new IllegalArgumentException("Cannot cancel booking with status: COMPLETED");
+        }
+        if (booking.getStatus() == BookingStatus.EXPIRED) {
+            throw new IllegalArgumentException("Cannot cancel booking with status: EXPIRED");
+        }
+
+        // Only CONFIRMED or PENDING bookings may be cancelled
+        if (booking.getStatus() != BookingStatus.CONFIRMED && booking.getStatus() != BookingStatus.PENDING) {
             throw new IllegalArgumentException("Cannot cancel booking with status: " + booking.getStatus());
         }
 
+        // 4. Cancellation cutoff validation for DRIVER
+        if (isDriver) {
+            Instant cutoffDeadline = booking.getStartTime().minus(Duration.ofMinutes(cancellationCutoffMinutes));
+            Instant now = Instant.now(clock);
+            if (now.isAfter(cutoffDeadline)) {
+                auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_REJECTED, currentUser.getEmail(),
+                        "Cancellation rejected: cutoff deadline passed for booking id=" + id);
+                throw new IllegalArgumentException("Cancellation deadline has passed. Bookings must be cancelled at least " +
+                        cancellationCutoffMinutes + " minutes before start time");
+            }
+        }
+
         booking.setStatus(BookingStatus.CANCELLED);
-        Booking updatedBooking = bookingRepository.save(booking);
+        Booking updatedBooking = bookingRepository.saveAndFlush(booking);
 
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CANCELLED, currentUser.getEmail(),
                 "Cancelled booking id=" + id);
 
         return BookingResponse.fromEntity(updatedBooking);
     }
+
+    @Transactional
+    public BookingResponse confirmBooking(Long id) {
+        User currentUser = currentUserService.getCurrentUserEntity();
+
+        Booking booking = bookingRepository.findByIdWithLock(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
+
+        // Terminal states cannot become CONFIRMED
+        if (booking.getStatus() == BookingStatus.CANCELLED ||
+                booking.getStatus() == BookingStatus.COMPLETED ||
+                booking.getStatus() == BookingStatus.EXPIRED) {
+            throw new IllegalArgumentException("Cannot confirm booking with terminal status: " + booking.getStatus());
+        }
+
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            throw new IllegalArgumentException("Cannot confirm booking with status: " + booking.getStatus());
+        }
+
+        booking.setStatus(BookingStatus.CONFIRMED);
+        Booking updatedBooking = bookingRepository.saveAndFlush(booking);
+
+        auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CONFIRMED, currentUser.getEmail(),
+                "Confirmed booking id=" + id);
+
+        return BookingResponse.fromEntity(updatedBooking);
+    }
+
+    @Transactional
+    public BookingResponse completeBooking(Long id) {
+        User currentUser = currentUserService.getCurrentUserEntity();
+
+        Booking booking = bookingRepository.findByIdWithLock(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
+
+        if (booking.getStatus() != BookingStatus.CONFIRMED) {
+            throw new IllegalArgumentException("Cannot complete booking with status: " + booking.getStatus());
+        }
+
+        booking.setStatus(BookingStatus.COMPLETED);
+        Booking updatedBooking = bookingRepository.saveAndFlush(booking);
+
+        auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_COMPLETED, currentUser.getEmail(),
+                "Completed booking id=" + id);
+
+        return BookingResponse.fromEntity(updatedBooking);
+    }
+
+    @Transactional
+    public BookingResponse expireBooking(Long id) {
+        User currentUser = currentUserService.getCurrentUserEntity();
+
+        Booking booking = bookingRepository.findByIdWithLock(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
+
+        if (booking.getStatus() == BookingStatus.EXPIRED) {
+            return BookingResponse.fromEntity(booking);
+        }
+
+        if (booking.getStatus() == BookingStatus.CANCELLED || booking.getStatus() == BookingStatus.COMPLETED) {
+            throw new IllegalArgumentException("Cannot expire booking with status: " + booking.getStatus());
+        }
+
+        if (booking.getStatus() != BookingStatus.CONFIRMED && booking.getStatus() != BookingStatus.PENDING) {
+            throw new IllegalArgumentException("Cannot expire booking with status: " + booking.getStatus());
+        }
+
+        booking.setStatus(BookingStatus.EXPIRED);
+        Booking updatedBooking = bookingRepository.saveAndFlush(booking);
+
+        auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_EXPIRED, currentUser.getEmail(),
+                "Expired booking id=" + id);
+
+        return BookingResponse.fromEntity(updatedBooking);
+    }
+
+    @Transactional
+    public int expireEligibleBookings(Instant asOfTime) {
+        List<Booking> eligibleBookings = bookingRepository.findEligibleForExpiryWithLock(
+                asOfTime, BookingStatus.CONFIRMED, BookingStatus.PENDING);
+
+        if (eligibleBookings.isEmpty()) {
+            return 0;
+        }
+
+        for (Booking booking : eligibleBookings) {
+            booking.setStatus(BookingStatus.EXPIRED);
+            bookingRepository.save(booking);
+            auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_EXPIRED, "SYSTEM_SCHEDULER",
+                    "Auto-expired booking id=" + booking.getId());
+        }
+
+        bookingRepository.flush();
+        return eligibleBookings.size();
+    }
+
 
     private void validateOperatingHours(ParkingLot lot, Instant startTime, Instant endTime) {
         if (lot.getOpeningTime() == null || lot.getClosingTime() == null) {

@@ -59,4 +59,26 @@ public class BookingController {
         BookingResponse response = bookingService.cancelBooking(id);
         return ResponseEntity.ok(response);
     }
+
+    @PostMapping("/{id}/confirm")
+    @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
+    public ResponseEntity<BookingResponse> confirmBooking(@PathVariable Long id) {
+        BookingResponse response = bookingService.confirmBooking(id);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/complete")
+    @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
+    public ResponseEntity<BookingResponse> completeBooking(@PathVariable Long id) {
+        BookingResponse response = bookingService.completeBooking(id);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/expire")
+    @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
+    public ResponseEntity<BookingResponse> expireBooking(@PathVariable Long id) {
+        BookingResponse response = bookingService.expireBooking(id);
+        return ResponseEntity.ok(response);
+    }
 }
+

@@ -292,6 +292,62 @@ Phase 5 mandates a robust, production-grade concurrency control mechanism strict
 - **Negative:**
   - Serializes concurrent booking attempts on the exact same parking slot for the duration of the short transaction (~5-10ms).
 
+---
+
+## ADR 011: Booking Lifecycle State Machine, Cancellation Rules, and Automated Expiry
+
+### Status
+Accepted
+
+### Context
+Phase 6 requires robust booking lifecycle management across the defined lifecycle states: `PENDING`, `CONFIRMED`, `CANCELLED`, `COMPLETED`, and `EXPIRED`. We must prevent arbitrary client status modification, enforce strict role-based access control, enforce configurable driver cancellation cutoff deadlines, ensure automated idempotent expiry of elapsed reservations, and guarantee thread-safe concurrent lifecycle transitions using database transaction semantics.
+
+### Decision
+1. **Strict Finite State Machine (FSM)**:
+   - **Active States**: `PENDING`, `CONFIRMED`.
+   - **Terminal States**: `CANCELLED`, `COMPLETED`, `EXPIRED`.
+   - **Legal Transitions**:
+     - `PENDING -> CONFIRMED` (via authorized `POST /api/bookings/{id}/confirm`)
+     - `PENDING -> CANCELLED` (via `POST /api/bookings/{id}/cancel`)
+     - `PENDING -> EXPIRED` (via scheduler or authorized `POST /api/bookings/{id}/expire`)
+     - `CONFIRMED -> CANCELLED` (via `POST /api/bookings/{id}/cancel` within cutoff)
+     - `CONFIRMED -> COMPLETED` (via authorized `POST /api/bookings/{id}/complete`)
+     - `CONFIRMED -> EXPIRED` (via scheduler or authorized `POST /api/bookings/{id}/expire`)
+   - **Terminal State Invariant**: Once a booking reaches `CANCELLED`, `COMPLETED`, or `EXPIRED`, no transitions to active states or other terminal states are permitted. Repeated cancellation attempts are rejected with HTTP 400 Bad Request.
+
+2. **Prohibition of Client-Supplied Status Changes**:
+   - No generic `PATCH /api/bookings/{id}` endpoint accepting arbitrary status payloads is exposed.
+   - Drivers can only invoke `/cancel` on their own active bookings.
+   - Administrative lifecycle operations (`/confirm`, `/complete`, `/expire`) are restricted to `OPERATOR` and `ADMIN` roles using `@PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")`.
+
+3. **Configurable Driver Cancellation Cutoff**:
+   - Externalized via `smartpark.booking.cancellation-cutoff-minutes` (default: 15 minutes).
+   - **Boundary Semantics**: Cancellation deadline is $t_{cutoff} = \text{startTime} - \text{cutoffMinutes}$.
+     - At $t \le t_{cutoff}$, cancellation is permitted.
+     - For $t > t_{cutoff}$ (`now.isAfter(cutoffDeadline)`), cancellation is rejected with HTTP 400 Bad Request.
+
+4. **Automated Expiry & Idempotent Scheduling**:
+   - `BookingExpiryScheduler` runs periodically (`@Scheduled(fixedDelayString = "${smartpark.booking.expiry-check-interval-ms:60000}")`) using Spring's scheduling framework.
+   - **Expiry Boundary**: Because interval reservations are half-open $[start, end)$, at $t = end$ the booking has concluded. Thus `endTime <= now` classifies an uncompleted booking as expired.
+   - **Query Optimization**: Flyway migration `V3__booking_lifecycle_indexes.sql` introduces partial index `idx_bookings_active_expiry` on `(end_time, start_time) WHERE (status IN ('CONFIRMED', 'PENDING'))`.
+   - **Idempotency**: Transitioning a booking to `EXPIRED` immediately drops the row from the partial index and active query criteria, ensuring subsequent scheduler runs result in 0 modifications without errors.
+
+5. **Pessimistic Row Locking for Concurrent Lifecycle Operations**:
+   - `BookingService` acquires `findByIdWithLock(id)` (`SELECT ... FOR UPDATE`) before modifying booking status.
+   - If two simultaneous cancellation requests target the same booking, the transactions are serialized: exactly 1 succeeds (HTTP 200 OK) and the second re-reads the committed state, sees `status == CANCELLED`, and throws HTTP 400 Bad Request ("Booking is already cancelled").
+
+6. **Why Redis / Kafka / Distributed Schedulers Are Deferred**:
+   - PostgreSQL row-level locks and partial B-Tree indexes provide complete relational ACID consistency without the network failure modes, split-brain locks, or operational overhead of external distributed infrastructure.
+
+### Consequences
+- **Positive:**
+  - Absolute protection against illegal status transitions and client tampering.
+  - Zero deadlocks or race conditions on concurrent cancellations.
+  - Sub-millisecond database-driven expiry queries using partial indexing.
+  - Clean audit trails for every transition.
+- **Negative:**
+  - Scheduler runs within application process memory; distributed scheduling coordinators (e.g. ShedLock) will be added when multi-instance production clustering is deployed.
+
 
 
 

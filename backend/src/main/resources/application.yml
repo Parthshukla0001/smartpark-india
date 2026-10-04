@@ -41,3 +41,11 @@ app:
     max-login-attempts: 5
     lockout-duration-minutes: 15
 
+smartpark:
+  booking:
+    cancellation-cutoff-minutes: 15
+    expiry-check-interval-ms: 60000
+    expiry-scheduler:
+      enabled: true
+
+
