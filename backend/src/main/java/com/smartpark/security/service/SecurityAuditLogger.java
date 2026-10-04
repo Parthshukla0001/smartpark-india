@@ -17,7 +17,17 @@ public class SecurityAuditLogger {
         LOGIN_SUCCESS,
         LOGIN_FAILURE,
         ACCOUNT_LOCKED,
-        ACCESS_DENIED
+        ACCESS_DENIED,
+        PARKING_LOT_CREATED,
+        PARKING_LOT_UPDATED,
+        PARKING_LOT_DEACTIVATED,
+        PARKING_FLOOR_CREATED,
+        PARKING_FLOOR_UPDATED,
+        PARKING_FLOOR_DELETED,
+        PARKING_SLOT_CREATED,
+        PARKING_SLOT_UPDATED,
+        PARKING_SLOT_STATUS_CHANGED,
+        PARKING_SLOT_DEACTIVATED
     }
 
     public void logEvent(SecurityEvent event, String identifier, String details) {

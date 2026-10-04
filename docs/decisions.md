@@ -161,3 +161,41 @@ Implement a **lightweight, thread-safe in-memory login attempt service** (`Login
 - **Negative:**
   - **Known limitation:** State is local to the running JVM instance and does not share rate-limiting data across multiple instances in a cluster. This temporary baseline will be upgraded to distributed Redis rate limiting in a subsequent phase.
 
+---
+
+## ADR 008: Parking Hierarchy Architecture, Authorization, and Soft-Deactivation
+
+### Status
+Accepted
+
+### Context
+Phase 3 requires REST APIs for managing the parking facility infrastructure: `ParkingLot` → `ParkingFloor` → `ParkingSlot`. We must prevent orphaned records, ensure strict multi-tenant facility boundaries, prevent destructive hard deletion that breaks future reservation histories, enforce secure RBAC, and handle database constraint race conditions cleanly.
+
+### Decision
+1. **Hierarchical REST Routing**:
+   - APIs reflect physical relationships: `/api/parking-lots/{lotId}/floors/{floorId}/slots/{slotId}`.
+   - Services perform full upward parent-ownership validation on all operations, rejecting URL mismatch fraud or cross-tenant parameter attacks (e.g. requesting slot 20 under floor 10 when slot 20 actually resides on floor 11).
+2. **Strict RBAC Differentiation**:
+   - `ADMIN`: Unrestricted infrastructure administration, soft-deactivating lots, deleting empty floors, and configuring slots.
+   - `OPERATOR`: Permitted to create/update lots, floors, and slots, and toggle operational statuses (`AVAILABLE`, `OUT_OF_SERVICE`).
+   - `DRIVER`: Strictly read-only access. Automatically restricted to active parking lots (`active = true`). All mutation attempts receive HTTP 403 Forbidden.
+3. **Safe Deactivation / Soft-Delete Semantics**:
+   - Deleting a `ParkingLot` sets `active = false` rather than executing SQL `DELETE`.
+   - Deleting a `ParkingSlot` sets `status = OUT_OF_SERVICE`.
+   - Deleting a `ParkingFloor` requires that the floor contains zero slots (`countByParkingFloorId == 0`). If slots exist, deletion is rejected with 400 Bad Request to protect historical foreign key integrity.
+4. **DTO Encapsulation & Safe Pagination**:
+   - Database entities are never exposed in REST controllers. All inputs and outputs use dedicated request/response DTOs.
+   - Pagination uses `PageResponse<T>` with bounded page sizes (`max = 100`) and a strict whitelist of allowable sort properties to prevent SQL manipulation or denial-of-service.
+5. **Declarative Transaction Boundaries**:
+   - Write operations execute under `@Transactional` boundaries at the service layer.
+   - Query operations execute under `@Transactional(readOnly = true)`.
+
+### Consequences
+- **Positive:**
+  - Complete protection against relational hierarchy spoofing.
+  - Zero accidental data destruction for future booking histories.
+  - Clear separation between public customer browsing and facility staff operations.
+- **Negative:**
+  - Deactivating a parking lot requires subsequent booking queries to explicitly check the active flag (which is already enforced in the repository layer).
+
+

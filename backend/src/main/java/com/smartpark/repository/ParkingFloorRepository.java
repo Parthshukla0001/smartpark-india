@@ -10,5 +10,7 @@ import java.util.Optional;
 @Repository
 public interface ParkingFloorRepository extends JpaRepository<ParkingFloor, Long> {
     List<ParkingFloor> findByParkingLotId(Long parkingLotId);
+    List<ParkingFloor> findByParkingLotIdOrderByFloorNumberAsc(Long parkingLotId);
     Optional<ParkingFloor> findByParkingLotIdAndFloorNumber(Long parkingLotId, int floorNumber);
+    boolean existsByParkingLotIdAndFloorNumber(Long parkingLotId, int floorNumber);
 }

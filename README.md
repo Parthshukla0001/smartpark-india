@@ -2,7 +2,7 @@
 
 **India-Focused Smart Parking Management Platform**
 
-> Currently implemented: **Phase 2 — Authentication & Security Foundation**
+> Currently implemented: **Phase 3 — Parking Management APIs**
 
 SmartPark India is an enterprise-grade smart parking management platform designed specifically for the Indian market. It provides real-time parking availability, slot booking and reservations, payment integration, and administrative dashboards for parking operators and drivers.
 
@@ -15,9 +15,10 @@ SmartPark India is an enterprise-grade smart parking management platform designe
 | **Phase 0 — Project Foundation** | Monorepo structure, Spring Boot 4 / Java 21, Vite + React + TS, Docker, Health endpoints | ✅ Complete |
 | **Phase 1 — Domain Model & Database Foundation** | PostgreSQL schema, Flyway migrations, Core JPA entities (User, Role, Vehicle, ParkingLot, ParkingFloor, ParkingSlot, Booking), Integrity constraints, Indexes, Persistence tests | ✅ Complete |
 | **Phase 2 — Authentication & Security Foundation** | Spring Security, BCrypt hashing, JWT authentication (JJWT), Role-Based Access Control (RBAC), DTOs, Login brute-force protection, Security audit logging, 28 automated tests | ✅ Complete |
-| **Phase 3 — Facility Management & Booking Engine** | Parking facility CRUD, Slot reservation workflow, Double-booking concurrency prevention | 🔜 Next |
-| **Phase 4 — Payments & Real-time Integrations** | UPI / Payment Gateway, WebSockets availability stream, Redis cache | 🔜 Planned |
-| **Phase 5 — Event Streaming & Observability** | Apache Kafka events, Prometheus / Grafana metrics, Rate limiting, Distributed tracing | 🔜 Planned |
+| **Phase 3 — Parking Management APIs** | REST APIs for ParkingLot, ParkingFloor, ParkingSlot; Hierarchy validation; Safe deactivation/soft-delete; Search, filter & pagination; 50 automated tests | ✅ Complete |
+| **Phase 4 — Booking Engine & Concurrency** | Slot reservation workflow, Double-booking concurrency prevention, Temporal availability | 🔜 Next |
+| **Phase 5 — Payments & Real-time Integrations** | UPI / Payment Gateway, WebSockets availability stream, Redis cache | 🔜 Planned |
+| **Phase 6 — Event Streaming & Observability** | Apache Kafka events, Prometheus / Grafana metrics, Rate limiting, Distributed tracing | 🔜 Planned |
 
 ---
 

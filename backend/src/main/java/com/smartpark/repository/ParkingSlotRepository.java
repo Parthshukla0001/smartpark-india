@@ -12,7 +12,10 @@ import java.util.Optional;
 @Repository
 public interface ParkingSlotRepository extends JpaRepository<ParkingSlot, Long> {
     List<ParkingSlot> findByParkingFloorId(Long parkingFloorId);
+    List<ParkingSlot> findByParkingFloorIdOrderBySlotNumberAsc(Long parkingFloorId);
     List<ParkingSlot> findByParkingFloorIdAndStatus(Long parkingFloorId, SlotStatus status);
     List<ParkingSlot> findByParkingFloorIdAndSlotType(Long parkingFloorId, SlotType slotType);
     Optional<ParkingSlot> findByParkingFloorIdAndSlotNumber(Long parkingFloorId, String slotNumber);
+    boolean existsByParkingFloorIdAndSlotNumber(Long parkingFloorId, String slotNumber);
+    long countByParkingFloorId(Long parkingFloorId);
 }
