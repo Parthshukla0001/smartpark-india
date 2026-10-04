@@ -110,3 +110,54 @@ Full concurrency handling (PostgreSQL exclusion constraints with `btree_gist`, p
   - Avoids premature, complex concurrency code before the booking service architecture is ready.
 - **Negative:**
   - Application logic must wait until Phase 2/3 for complete concurrency locking guarantees.
+
+---
+
+## ADR 006: Stateless JWT Authentication via Spring Security
+
+### Status
+Accepted
+
+### Context
+SmartPark India serves mobile and web clients across distributed services. Server-side session storage (HTTP sessions) requires session affinity/sticky sessions, increases server memory footprint, and creates horizontal scaling friction.
+
+### Decision
+Use **stateless JWT-based authentication** (via JJWT 0.12.x) integrated directly into Spring Security:
+1. Session creation policy set to `SessionCreationPolicy.STATELESS`.
+2. Public registration restricts default role assignment strictly to `DRIVER`.
+3. JWT tokens contain non-sensitive claims (`userId`, `email`, `role`) signed using HMAC-SHA256.
+4. Passwords hashed using standard `BCryptPasswordEncoder` (cost factor 10).
+5. CSRF protection disabled strictly because authentication tokens are submitted via the `Authorization: Bearer <token>` header (not ambient browser cookies), which is immune to cross-site request forgery.
+
+### Consequences
+- **Positive:**
+  - Eliminates server session state, enabling seamless horizontal scale-out.
+  - Every API request is self-contained and independently verifiable.
+  - Built-in role claim powers Spring Security's `@PreAuthorize("hasRole('...')")`.
+- **Negative:**
+  - Immediate token revocation prior to expiration requires a token blocklist (which will be implemented using Redis in a future phase).
+
+---
+
+## ADR 007: Baseline In-Memory Login Brute-Force Protection
+
+### Status
+Accepted
+
+### Context
+Exposing public login endpoints (`/api/auth/login`) invites credential stuffing and automated brute-force attacks. However, external infrastructure dependencies (such as Redis) are prohibited in Phase 2.
+
+### Decision
+Implement a **lightweight, thread-safe in-memory login attempt service** (`LoginAttemptService`):
+1. Tracks consecutive failed attempts by normalized account email in a `ConcurrentHashMap`.
+2. Threshold of 5 consecutive failures triggers an automatic 15-minute temporary lockout.
+3. Successful authentication resets the failure counter immediately.
+4. An automated cleanup routine trims expired entries to prevent unbounded memory consumption.
+
+### Consequences
+- **Positive:**
+  - Protects against brute-force attacks in single-instance and development environments without third-party dependencies.
+  - Testable entirely in isolation with unit and integration tests.
+- **Negative:**
+  - **Known limitation:** State is local to the running JVM instance and does not share rate-limiting data across multiple instances in a cluster. This temporary baseline will be upgraded to distributed Redis rate limiting in a subsequent phase.
+
