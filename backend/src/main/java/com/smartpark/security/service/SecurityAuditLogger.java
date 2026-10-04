@@ -27,7 +27,10 @@ public class SecurityAuditLogger {
         PARKING_SLOT_CREATED,
         PARKING_SLOT_UPDATED,
         PARKING_SLOT_STATUS_CHANGED,
-        PARKING_SLOT_DEACTIVATED
+        PARKING_SLOT_DEACTIVATED,
+        BOOKING_CREATED,
+        BOOKING_CANCELLED,
+        BOOKING_REJECTED
     }
 
     public void logEvent(SecurityEvent event, String identifier, String details) {

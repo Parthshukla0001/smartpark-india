@@ -198,4 +198,37 @@ Phase 3 requires REST APIs for managing the parking facility infrastructure: `Pa
 - **Negative:**
   - Deactivating a parking lot requires subsequent booking queries to explicitly check the active flag (which is already enforced in the repository layer).
 
+---
+
+## ADR 009: Core Booking Engine, Interval Overlap Logic, and Concurrency Boundaries
+
+### Status
+Accepted
+
+### Context
+Phase 4 requires core reservation capabilities for drivers: creating bookings, retrieving personal booking histories, and canceling existing reservations. The engine must validate vehicle ownership, parking slot operational readiness, parent facility operating hours, temporal sanity, and ensure that overlapping reservations on the same slot are rejected. Crucially, the boundary between application-level checks and concurrent double-booking protection must be explicitly architected.
+
+### Decision
+1. **Server-Side Ownership & Security Principle**:
+   - The booking owner is never accepted from the request payload. `CurrentUserService` resolves the authenticated principal directly from the validated JWT.
+   - Vehicle ownership is verified: `vehicle.getUser().getId().equals(currentUser.getId())`. Mismatched vehicle IDs return 404 Not Found to prevent enumeration or cross-account misuse.
+   - Inactive vehicles (`vehicle.isActive() == false`) are barred from creating bookings.
+2. **Temporal & Facility Boundary Rules**:
+   - Booking `startTime` must be strictly before `endTime`, cannot start in the past (validated against injectable `java.time.Clock`), and duration is bounded to [15 minutes, 24 hours].
+   - If operating hours are defined on the parent `ParkingLot`, bookings must fall strictly within `openingTime` and `closingTime` (evaluated in India Standard Time `Asia/Kolkata`).
+3. **Interval-Overlap Availability Query**:
+   - Overlap is evaluated in PostgreSQL using index `idx_bookings_slot_times`:
+     `b.parkingSlot.id = :slotId AND b.startTime < :requestedEndTime AND b.endTime > :requestedStartTime AND b.status IN ('CONFIRMED', 'PENDING')`
+   - Active reserving statuses block booking (`CONFIRMED`, `PENDING`). Inactive statuses (`CANCELLED`, `COMPLETED`, `EXPIRED`) release slot availability.
+   - Adjacent bookings (where one ends exactly when another begins) do not conflict.
+4. **Booking Lifecycle & Status**:
+   - Initial status is server-controlled and created as `CONFIRMED`.
+   - Cancellation transitions `CONFIRMED` → `CANCELLED`.
+   - Once `CANCELLED`, repeated cancellation attempts are rejected (400 Bad Request).
+5. **Transaction Boundary & Concurrency Limitation**:
+   - Creation and cancellation methods run inside atomic `@Transactional` service boundaries.
+   - **Explicit Limitation**: Application-level availability checks (`SELECT` followed by `INSERT`) do **not** prevent concurrent race conditions. If two concurrent requests query availability at the exact same instant, both can pass the check before either transaction commits, resulting in a double-booking.
+   - Solving concurrent double-booking is explicitly scheduled for Phase 5 (via database-level exclusion constraints, pessimistic locking, or distributed locks).
+
+
 

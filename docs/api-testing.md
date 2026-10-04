@@ -410,3 +410,170 @@ Submit 5 consecutive failed login attempts with wrong credentials for the same e
 - **Headers:** `Authorization: Bearer <ADMIN_OR_OPERATOR_JWT>`
 - **Response (`204 No Content`)** *(Safely sets status to `OUT_OF_SERVICE`)*
 
+---
+
+## 3. Core Booking Engine APIs (Phase 4)
+
+### Role Permissions Matrix
+
+| Endpoint | Method | DRIVER | OPERATOR | ADMIN | Description |
+|---|---|:---:|:---:|:---:|---|
+| `/api/bookings` | `POST` | ✅ | ✅ | ✅ | Create booking for authenticated user's vehicle |
+| `/api/bookings` | `GET` | ✅ | ✅ | ✅ | List authenticated user's bookings (paginated, status filter) |
+| `/api/bookings/{id}` | `GET` | ✅ (Own only) | ✅ (Own only) | ✅ (Own only) | Get authenticated user's booking details by ID |
+| `/api/bookings/{id}/cancel` | `PATCH` / `POST` | ✅ (Own only) | ✅ (Own only) | ✅ (Own only) | Cancel confirmed booking |
+
+---
+
+### 3.1 Booking Examples
+
+#### 1. Create a Booking
+- **Method:** `POST`
+- **URL:** `http://localhost:8080/api/bookings`
+- **Headers:**
+  - `Authorization: Bearer <DRIVER_JWT>`
+  - `Content-Type: application/json`
+- **Body:**
+```json
+{
+  "vehicleId": 1,
+  "parkingSlotId": 101,
+  "startTime": "2026-10-06T10:00:00Z",
+  "endTime": "2026-10-06T12:00:00Z"
+}
+```
+*(Notice: user ID and initial status are not provided by the client; the server binds the authenticated principal and sets status to `CONFIRMED`)*
+
+- **Response (`201 Created`):**
+```json
+{
+  "id": 501,
+  "userId": 1,
+  "userEmail": "arjun.mehta@example.in",
+  "vehicleId": 1,
+  "vehicleRegistrationNumber": "MH12AB1234",
+  "vehicleType": "CAR",
+  "parkingSlotId": 101,
+  "slotNumber": "G-01",
+  "slotType": "EV",
+  "parkingFloorId": 10,
+  "floorName": "Ground Floor",
+  "parkingLotId": 1,
+  "parkingLotName": "Esplanade Smart Hub",
+  "startTime": "2026-10-06T10:00:00Z",
+  "endTime": "2026-10-06T12:00:00Z",
+  "status": "CONFIRMED",
+  "createdAt": "2026-10-04T17:50:00Z",
+  "updatedAt": "2026-10-04T17:50:00Z"
+}
+```
+
+#### 2. Get My Bookings (with Pagination and Optional Status Filter)
+- **Method:** `GET`
+- **URL:** `http://localhost:8080/api/bookings?status=CONFIRMED&page=0&size=20`
+- **Headers:** `Authorization: Bearer <DRIVER_JWT>`
+- **Response (`200 OK`):**
+```json
+{
+  "content": [
+    {
+      "id": 501,
+      "userId": 1,
+      "userEmail": "arjun.mehta@example.in",
+      "vehicleId": 1,
+      "vehicleRegistrationNumber": "MH12AB1234",
+      "vehicleType": "CAR",
+      "parkingSlotId": 101,
+      "slotNumber": "G-01",
+      "slotType": "EV",
+      "parkingFloorId": 10,
+      "floorName": "Ground Floor",
+      "parkingLotId": 1,
+      "parkingLotName": "Esplanade Smart Hub",
+      "startTime": "2026-10-06T10:00:00Z",
+      "endTime": "2026-10-06T12:00:00Z",
+      "status": "CONFIRMED",
+      "createdAt": "2026-10-04T17:50:00Z",
+      "updatedAt": "2026-10-04T17:50:00Z"
+    }
+  ],
+  "pageNumber": 0,
+  "pageSize": 20,
+  "totalElements": 1,
+  "totalPages": 1,
+  "last": true
+}
+```
+
+#### 3. Get Booking by ID
+- **Method:** `GET`
+- **URL:** `http://localhost:8080/api/bookings/501`
+- **Headers:** `Authorization: Bearer <DRIVER_JWT>`
+- **Response (`200 OK`):**
+```json
+{
+  "id": 501,
+  "userId": 1,
+  "userEmail": "arjun.mehta@example.in",
+  "vehicleId": 1,
+  "vehicleRegistrationNumber": "MH12AB1234",
+  "vehicleType": "CAR",
+  "parkingSlotId": 101,
+  "slotNumber": "G-01",
+  "slotType": "EV",
+  "parkingFloorId": 10,
+  "floorName": "Ground Floor",
+  "parkingLotId": 1,
+  "parkingLotName": "Esplanade Smart Hub",
+  "startTime": "2026-10-06T10:00:00Z",
+  "endTime": "2026-10-06T12:00:00Z",
+  "status": "CONFIRMED",
+  "createdAt": "2026-10-04T17:50:00Z",
+  "updatedAt": "2026-10-04T17:50:00Z"
+}
+```
+*(Notice: If another user attempts to retrieve booking `501`, the API returns `404 Not Found` without disclosing the resource)*
+
+#### 4. Cancel Booking
+- **Method:** `PATCH` (or `POST`)
+- **URL:** `http://localhost:8080/api/bookings/501/cancel`
+- **Headers:** `Authorization: Bearer <DRIVER_JWT>`
+- **Response (`200 OK`):**
+```json
+{
+  "id": 501,
+  "userId": 1,
+  "userEmail": "arjun.mehta@example.in",
+  "vehicleId": 1,
+  "vehicleRegistrationNumber": "MH12AB1234",
+  "vehicleType": "CAR",
+  "parkingSlotId": 101,
+  "slotNumber": "G-01",
+  "slotType": "EV",
+  "parkingFloorId": 10,
+  "floorName": "Ground Floor",
+  "parkingLotId": 1,
+  "parkingLotName": "Esplanade Smart Hub",
+  "startTime": "2026-10-06T10:00:00Z",
+  "endTime": "2026-10-06T12:00:00Z",
+  "status": "CANCELLED",
+  "createdAt": "2026-10-04T17:50:00Z",
+  "updatedAt": "2026-10-04T17:55:00Z"
+}
+```
+
+#### 5. Demonstrate Conflict on Overlapping Reservation (`409 Conflict`)
+If an active booking exists from 10:00 to 12:00, requesting 11:00 to 13:00 on the same slot triggers:
+
+- **Response (`409 Conflict`):**
+```json
+{
+  "timestamp": "2026-10-04T17:52:00Z",
+  "status": 409,
+  "error": "BOOKING_CONFLICT",
+  "message": "Parking slot is not available for the requested time",
+  "path": "/api/bookings"
+}
+```
+
+
