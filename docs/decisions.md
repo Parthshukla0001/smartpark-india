@@ -230,5 +230,68 @@ Phase 4 requires core reservation capabilities for drivers: creating bookings, r
    - **Explicit Limitation**: Application-level availability checks (`SELECT` followed by `INSERT`) do **not** prevent concurrent race conditions. If two concurrent requests query availability at the exact same instant, both can pass the check before either transaction commits, resulting in a double-booking.
    - Solving concurrent double-booking is explicitly scheduled for Phase 5 (via database-level exclusion constraints, pessimistic locking, or distributed locks).
 
+---
+
+## ADR 010: Database-Level Booking Concurrency Protection and Exclusion Constraints
+
+### Status
+Accepted
+
+### Context
+In Phase 4, the core booking engine relied on an application-level availability check (`SELECT` overlap query followed by `INSERT`). Under concurrent traffic, two transactions ($T_1$ and $T_2$) could both execute the availability check at the exact same instant, find no conflicting row, and proceed to insert overlapping bookings for the same parking slot.
+
+Phase 5 mandates a robust, production-grade concurrency control mechanism strictly within PostgreSQL and Spring Boot, without relying on Redis or distributed locking.
+
+### Decision
+1. **PostgreSQL GiST Partial Exclusion Constraint (`uq_bookings_no_overlapping_active_slots`)**:
+   - Enabled the `btree_gist` extension in Flyway migration `V2__booking_concurrency_protection.sql`.
+   - Added a partial exclusion constraint on table `bookings`:
+     ```sql
+     ALTER TABLE bookings
+     ADD CONSTRAINT uq_bookings_no_overlapping_active_slots
+     EXCLUDE USING gist (
+         parking_slot_id WITH =,
+         tstzrange(start_time, end_time, '[)') WITH &&
+     )
+     WHERE (status IN ('CONFIRMED', 'PENDING'));
+     ```
+   - **Temporal Semantics**: Used half-open intervals `[start_time, end_time)` (`'[)'`), ensuring that adjacent bookings (e.g. 10:00–11:00 and 11:00–12:00) touch at boundary timestamps without conflicting.
+   - **Lifecycle Sensitivity**: Filtered with `WHERE (status IN ('CONFIRMED', 'PENDING'))` so that cancelled, completed, or expired bookings immediately release the slot interval for subsequent drivers without violating constraints.
+
+2. **Pessimistic Slot Row-Level Locking (`PESSIMISTIC_WRITE`) for Serialized Admission**:
+   - Concurrent uncoordinated `INSERT` statements colliding solely on a GiST exclusion constraint can trigger PostgreSQL transaction wait deadlocks (`40P01`).
+   - To eliminate deadlocks and provide clean serialized admission, `BookingService.createBooking` queries the target parking slot using pessimistic write locking:
+     ```java
+     @Lock(LockModeType.PESSIMISTIC_WRITE)
+     @Query("SELECT s FROM ParkingSlot s WHERE s.id = :id")
+     Optional<ParkingSlot> findByIdWithLock(@Param("id") Long id);
+     ```
+   - When $T_1$ and $T_2$ target the same slot simultaneously:
+     - $T_1$ locks the slot row (`FOR UPDATE`), verifies availability, inserts booking, and commits.
+     - $T_2$ waits on the slot row lock. Upon acquisition, $T_2$ executes the overlap check, immediately sees $T_1$'s committed booking, and throws `BookingConflictException` (HTTP 409).
+   - Concurrent bookings targeting *different* slots acquire locks on separate rows and proceed completely in parallel without contention.
+
+3. **Defense-in-Depth Exception Mapping**:
+   - `GlobalExceptionHandler` catches:
+     - `BookingConflictException` → HTTP 409 `BOOKING_CONFLICT`
+     - `DataIntegrityViolationException` (matching `uq_bookings_no_overlapping_active_slots`) → HTTP 409 `BOOKING_CONFLICT`
+     - `CannotAcquireLockException` and `PessimisticLockingFailureException` → HTTP 409 `BOOKING_CONFLICT`
+
+4. **Why Alternatives Were Rejected**:
+   - **In-Memory Java Locks (`synchronized` / `ReentrantLock`)**: Ineffective across multi-node or clustered deployments and lost on application restarts.
+   - **JPA `@Version` Optimistic Locking on ParkingSlot**: Forces a version bump on `ParkingSlot` for every booking, causing false-positive optimistic lock exceptions even when booking disjoint, non-overlapping time intervals on the same day.
+   - **Serializable Isolation Level**: Severe performance penalty, high serialization failure rates (`40001`), and complex retry requirements for unrelated transactions.
+   - **Redis Distributed Locks**: Out of scope for Phase 5; introduces external infrastructure dependencies and network partition edge cases before relational guarantees are hardened.
+
+### Consequences
+- **Positive:**
+  - Absolute mathematical and transactional guarantee against double bookings at the database level.
+  - Zero deadlocks under concurrent load.
+  - Non-overlapping adjacent bookings and concurrent multi-slot bookings execute seamlessly.
+  - Uniform HTTP 409 error responses for conflict scenarios.
+- **Negative:**
+  - Serializes concurrent booking attempts on the exact same parking slot for the duration of the short transaction (~5-10ms).
+
+
 
 

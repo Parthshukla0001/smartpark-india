@@ -11,6 +11,7 @@ import com.smartpark.repository.ParkingSlotRepository;
 import com.smartpark.repository.VehicleRepository;
 import com.smartpark.security.service.CurrentUserService;
 import com.smartpark.security.service.SecurityAuditLogger;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -72,9 +73,10 @@ public class BookingService {
             throw new IllegalArgumentException("Cannot create booking for an inactive vehicle");
         }
 
-        // 2. Validate parking slot exists and is bookable
-        ParkingSlot slot = parkingSlotRepository.findById(request.getParkingSlotId())
+        // 2. Validate parking slot exists and is bookable (acquire pessimistic write lock on slot row to serialize concurrent reservations on the same slot)
+        ParkingSlot slot = parkingSlotRepository.findByIdWithLock(request.getParkingSlotId())
                 .orElseThrow(() -> new ResourceNotFoundException("Parking slot not found with id: " + request.getParkingSlotId()));
+
 
         if (slot.getStatus() == SlotStatus.OUT_OF_SERVICE) {
             throw new IllegalArgumentException("Parking slot is out of service and cannot be booked");
@@ -129,7 +131,18 @@ public class BookingService {
 
         // 7. Initial status is server-controlled and starts as CONFIRMED
         Booking booking = new Booking(currentUser, vehicle, slot, startTime, endTime, BookingStatus.CONFIRMED);
-        Booking savedBooking = bookingRepository.save(booking);
+        Booking savedBooking;
+        try {
+            savedBooking = bookingRepository.saveAndFlush(booking);
+        } catch (DataIntegrityViolationException ex) {
+            String rootMessage = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
+            if (rootMessage != null && rootMessage.contains("uq_bookings_no_overlapping_active_slots")) {
+                auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_REJECTED, currentUser.getEmail(),
+                        "Concurrent race conflict: slot id=" + slot.getId() + " was booked simultaneously");
+                throw new BookingConflictException("Parking slot is not available for the requested time");
+            }
+            throw ex;
+        }
 
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CREATED, currentUser.getEmail(),
                 "Created booking id=" + savedBooking.getId() + " for slot id=" + slot.getId() +

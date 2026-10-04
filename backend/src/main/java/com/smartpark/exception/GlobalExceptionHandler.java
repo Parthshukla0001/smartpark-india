@@ -4,7 +4,9 @@ import com.smartpark.dto.common.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -98,6 +100,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException ex, HttpServletRequest request) {
         log.error("Data integrity violation on {}: {}", request.getRequestURI(), ex.getMessage());
+
+        String rootMessage = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
+        if (rootMessage != null && rootMessage.contains("uq_bookings_no_overlapping_active_slots")) {
+            ErrorResponse response = new ErrorResponse(
+                    HttpStatus.CONFLICT.value(),
+                    "BOOKING_CONFLICT",
+                    "Parking slot is not available for the requested time",
+                    request.getRequestURI()
+            );
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+        }
+
         ErrorResponse response = new ErrorResponse(
                 HttpStatus.CONFLICT.value(),
                 HttpStatus.CONFLICT.getReasonPhrase(),
@@ -106,6 +120,19 @@ public class GlobalExceptionHandler {
         );
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
+
+    @ExceptionHandler({CannotAcquireLockException.class, PessimisticLockingFailureException.class})
+    public ResponseEntity<ErrorResponse> handleLockingFailure(RuntimeException ex, HttpServletRequest request) {
+        log.warn("Lock acquisition failure on {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse response = new ErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                "BOOKING_CONFLICT",
+                "Parking slot is not available for the requested time",
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
 
     @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
     public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException ex, HttpServletRequest request) {

@@ -2,7 +2,7 @@
 
 **India-Focused Smart Parking Management Platform**
 
-> Currently implemented: **Phase 4 — Core Booking Engine**
+> Currently implemented: **Phase 5 — Concurrency & Double-Booking Prevention**
 
 SmartPark India is an enterprise-grade smart parking management platform designed specifically for the Indian market. It provides real-time parking availability, slot booking and reservations, payment integration, and administrative dashboards for parking operators and drivers.
 
@@ -17,9 +17,10 @@ SmartPark India is an enterprise-grade smart parking management platform designe
 | **Phase 2 — Authentication & Security Foundation** | Spring Security, BCrypt hashing, JWT authentication (JJWT), Role-Based Access Control (RBAC), DTOs, Login brute-force protection, Security audit logging, 28 automated tests | ✅ Complete |
 | **Phase 3 — Parking Management APIs** | REST APIs for ParkingLot, ParkingFloor, ParkingSlot; Hierarchy validation; Safe deactivation/soft-delete; Search, filter & pagination; 50 automated tests | ✅ Complete |
 | **Phase 4 — Core Booking Engine** | Booking lifecycle (create, get, cancel), Vehicle ownership, Slot status & facility checks, Interval-overlap availability, Duration & operating hours validation; 71 automated tests | ✅ Complete |
-| **Phase 5 — Concurrency & Double-Booking Prevention** | Pessimistic/Optimistic locking, PostgreSQL exclusion constraints, High-concurrency load testing | 🔜 Next |
-| **Phase 6 — Payments & Real-time Integrations** | UPI / Payment Gateway, WebSockets availability stream, Redis cache | 🔜 Planned |
+| **Phase 5 — Concurrency & Double-Booking Prevention** | PostgreSQL `btree_gist` exclusion constraints, Pessimistic slot row locking (`PESSIMISTIC_WRITE`), Deadlock elimination, Multi-threaded race condition tests; 78 automated tests | ✅ Complete |
+| **Phase 6 — Payments & Real-time Integrations** | UPI / Payment Gateway, WebSockets availability stream, Redis cache | 🔜 Next |
 | **Phase 7 — Event Streaming & Observability** | Apache Kafka events, Prometheus / Grafana metrics, Rate limiting, Distributed tracing | 🔜 Planned |
+
 
 ---
 
@@ -172,12 +173,12 @@ The frontend is available at **http://localhost:5173**.
 
 ---
 
-## ⚠️ Current Phase 1 Boundaries
-
+## ⚠️ Current Phase 5 Boundaries
+ 
 The following areas are intentionally reserved for upcoming phases:
-- User authentication, JWT issuance, and Spring Security
-- Real-time slot reservations, booking transitions, and concurrency locking
 - Payment gateway integration (UPI, cards, net banking)
-- Redis caching & Kafka event messaging
+- Redis distributed cache & Redis temporary hold timers
+- Kafka event streaming & asynchronous processing
 - WebSocket availability broadcasting
 - Production Docker orchestration and CI/CD pipelines
+
