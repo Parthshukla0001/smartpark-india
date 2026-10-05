@@ -3,10 +3,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { ParkingEventPayload } from '../types';
 
 function getWsUrl(): string {
-  // If running on Vite dev server (usually localhost:5173), connect directly to backend ws://localhost:8080/ws
-  // or proxy if configured.
-  const host = window.location.hostname;
-  return `ws://${host}:8080/ws`;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
 }
 
 class WebSocketManager {
