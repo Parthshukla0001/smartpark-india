@@ -8,6 +8,7 @@ import com.smartpark.exception.BookingConflictException;
 import com.smartpark.exception.ResourceNotFoundException;
 import com.smartpark.kafka.event.BookingKafkaEvent;
 import com.smartpark.kafka.outbox.OutboxService;
+import com.smartpark.observability.SmartParkMetrics;
 import com.smartpark.repository.BookingRepository;
 import com.smartpark.repository.ParkingSlotRepository;
 import com.smartpark.repository.VehicleRepository;
@@ -49,6 +50,7 @@ public class BookingService {
     private final int cancellationCutoffMinutes;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
     private final OutboxService outboxService;
+    private final SmartParkMetrics metrics;
 
     @Autowired
     public BookingService(BookingRepository bookingRepository,
@@ -59,7 +61,8 @@ public class BookingService {
                           Clock clock,
                           @Value("${smartpark.booking.cancellation-cutoff-minutes:15}") int cancellationCutoffMinutes,
                           org.springframework.context.ApplicationEventPublisher eventPublisher,
-                          @Autowired(required = false) OutboxService outboxService) {
+                          @Autowired(required = false) OutboxService outboxService,
+                          @Autowired(required = false) SmartParkMetrics metrics) {
         this.bookingRepository = bookingRepository;
         this.vehicleRepository = vehicleRepository;
         this.parkingSlotRepository = parkingSlotRepository;
@@ -69,6 +72,7 @@ public class BookingService {
         this.cancellationCutoffMinutes = cancellationCutoffMinutes;
         this.eventPublisher = eventPublisher;
         this.outboxService = outboxService;
+        this.metrics = metrics;
     }
 
     public BookingService(BookingRepository bookingRepository,
@@ -77,7 +81,7 @@ public class BookingService {
                           CurrentUserService currentUserService,
                           SecurityAuditLogger auditLogger,
                           Clock clock) {
-        this(bookingRepository, vehicleRepository, parkingSlotRepository, currentUserService, auditLogger, clock, 15, null, null);
+        this(bookingRepository, vehicleRepository, parkingSlotRepository, currentUserService, auditLogger, clock, 15, null, null, null);
     }
 
     private void publishParkingEvent(Long lotId, com.smartpark.websocket.dto.ParkingEventPayload payload) {
@@ -111,113 +115,130 @@ public class BookingService {
 
     @Transactional
     public BookingResponse createBooking(CreateBookingRequest request) {
-        User currentUser = currentUserService.getCurrentUserEntity();
-
-        // 1. Validate vehicle exists, belongs to authenticated user, and is active
-        Vehicle vehicle = vehicleRepository.findById(request.getVehicleId())
-                .orElseThrow(() -> new ResourceNotFoundException("Vehicle not found with id: " + request.getVehicleId()));
-
-        if (!vehicle.getUser().getId().equals(currentUser.getId())) {
-            throw new ResourceNotFoundException("Vehicle not found with id: " + request.getVehicleId());
-        }
-
-        if (!vehicle.isActive()) {
-            throw new IllegalArgumentException("Cannot create booking for an inactive vehicle");
-        }
-
-        // 2. Validate parking slot exists and is bookable (acquire pessimistic write lock on slot row to serialize concurrent reservations on the same slot)
-        ParkingSlot slot = parkingSlotRepository.findByIdWithLock(request.getParkingSlotId())
-                .orElseThrow(() -> new ResourceNotFoundException("Parking slot not found with id: " + request.getParkingSlotId()));
-
-
-        if (slot.getStatus() == SlotStatus.OUT_OF_SERVICE) {
-            throw new IllegalArgumentException("Parking slot is out of service and cannot be booked");
-        }
-
-        // 3. Validate hierarchy and parent facility status
-        ParkingFloor floor = slot.getParkingFloor();
-        if (floor == null) {
-            throw new ResourceNotFoundException("Associated parking floor not found");
-        }
-        ParkingLot lot = floor.getParkingLot();
-        if (lot == null) {
-            throw new ResourceNotFoundException("Associated parking lot not found");
-        }
-        if (!lot.isActive()) {
-            throw new IllegalArgumentException("Cannot book parking slot in an inactive parking facility");
-        }
-
-        // 4. Validate time range and duration limits
-        Instant startTime = request.getStartTime();
-        Instant endTime = request.getEndTime();
-
-        if (!endTime.isAfter(startTime)) {
-            throw new IllegalArgumentException("Booking end time must be after start time");
-        }
-
-        Instant now = Instant.now(clock);
-        if (startTime.isBefore(now)) {
-            throw new IllegalArgumentException("Booking start time cannot be in the past");
-        }
-
-        Duration duration = Duration.between(startTime, endTime);
-        if (duration.compareTo(MIN_DURATION) < 0) {
-            throw new IllegalArgumentException("Booking duration must be at least 15 minutes");
-        }
-        if (duration.compareTo(MAX_DURATION) > 0) {
-            throw new IllegalArgumentException("Booking duration cannot exceed 24 hours");
-        }
-
-        // 5. Validate operating hours if configured on parking lot
-        validateOperatingHours(lot, startTime, endTime);
-
-        // 6. Application-level availability check for overlapping active reservations
-        boolean hasOverlap = bookingRepository.existsByParkingSlotAndTimeOverlap(
-                slot.getId(), startTime, endTime, ACTIVE_RESERVING_STATUSES);
-
-        if (hasOverlap) {
-            auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_REJECTED, currentUser.getEmail(),
-                    "Slot id=" + slot.getId() + " is already booked for the requested time");
-            throw new BookingConflictException("Parking slot is not available for the requested time");
-        }
-
-        // 7. Initial status is server-controlled and starts as CONFIRMED
-        Booking booking = new Booking(currentUser, vehicle, slot, startTime, endTime, BookingStatus.CONFIRMED);
-        Booking savedBooking;
+        long startNanos = System.nanoTime();
         try {
-            savedBooking = bookingRepository.saveAndFlush(booking);
-        } catch (DataIntegrityViolationException ex) {
-            String rootMessage = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
-            if (rootMessage != null && rootMessage.contains("uq_bookings_no_overlapping_active_slots")) {
+            User currentUser = currentUserService.getCurrentUserEntity();
+
+            // 1. Validate vehicle exists, belongs to authenticated user, and is active
+            Vehicle vehicle = vehicleRepository.findById(request.getVehicleId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Vehicle not found with id: " + request.getVehicleId()));
+
+            if (!vehicle.getUser().getId().equals(currentUser.getId())) {
+                throw new ResourceNotFoundException("Vehicle not found with id: " + request.getVehicleId());
+            }
+
+            if (!vehicle.isActive()) {
+                throw new IllegalArgumentException("Cannot create booking for an inactive vehicle");
+            }
+
+            // 2. Validate parking slot exists and is bookable (acquire pessimistic write lock on slot row to serialize concurrent reservations on the same slot)
+            ParkingSlot slot = parkingSlotRepository.findByIdWithLock(request.getParkingSlotId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Parking slot not found with id: " + request.getParkingSlotId()));
+
+
+            if (slot.getStatus() == SlotStatus.OUT_OF_SERVICE) {
+                throw new IllegalArgumentException("Parking slot is out of service and cannot be booked");
+            }
+
+            // 3. Validate hierarchy and parent facility status
+            ParkingFloor floor = slot.getParkingFloor();
+            if (floor == null) {
+                throw new ResourceNotFoundException("Associated parking floor not found");
+            }
+            ParkingLot lot = floor.getParkingLot();
+            if (lot == null) {
+                throw new ResourceNotFoundException("Associated parking lot not found");
+            }
+            if (!lot.isActive()) {
+                throw new IllegalArgumentException("Cannot book parking slot in an inactive parking facility");
+            }
+
+            // 4. Validate time range and duration limits
+            Instant startTime = request.getStartTime();
+            Instant endTime = request.getEndTime();
+
+            if (!endTime.isAfter(startTime)) {
+                throw new IllegalArgumentException("Booking end time must be after start time");
+            }
+
+            Instant now = Instant.now(clock);
+            if (startTime.isBefore(now)) {
+                throw new IllegalArgumentException("Booking start time cannot be in the past");
+            }
+
+            Duration duration = Duration.between(startTime, endTime);
+            if (duration.compareTo(MIN_DURATION) < 0) {
+                throw new IllegalArgumentException("Booking duration must be at least 15 minutes");
+            }
+            if (duration.compareTo(MAX_DURATION) > 0) {
+                throw new IllegalArgumentException("Booking duration cannot exceed 24 hours");
+            }
+
+            // 5. Validate operating hours if configured on parking lot
+            validateOperatingHours(lot, startTime, endTime);
+
+            // 6. Application-level availability check for overlapping active reservations
+            boolean hasOverlap = bookingRepository.existsByParkingSlotAndTimeOverlap(
+                    slot.getId(), startTime, endTime, ACTIVE_RESERVING_STATUSES);
+
+            if (hasOverlap) {
+                if (metrics != null) {
+                    metrics.incrementBookingsConflicts();
+                }
                 auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_REJECTED, currentUser.getEmail(),
-                        "Concurrent race conflict: slot id=" + slot.getId() + " was booked simultaneously");
+                        "Slot id=" + slot.getId() + " is already booked for the requested time");
                 throw new BookingConflictException("Parking slot is not available for the requested time");
             }
-            throw ex;
+
+            // 7. Initial status is server-controlled and starts as CONFIRMED
+            Booking booking = new Booking(currentUser, vehicle, slot, startTime, endTime, BookingStatus.CONFIRMED);
+            Booking savedBooking;
+            try {
+                savedBooking = bookingRepository.saveAndFlush(booking);
+            } catch (DataIntegrityViolationException ex) {
+                String rootMessage = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
+                if (rootMessage != null && rootMessage.contains("uq_bookings_no_overlapping_active_slots")) {
+                    if (metrics != null) {
+                        metrics.incrementBookingsConflicts();
+                    }
+                    auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_REJECTED, currentUser.getEmail(),
+                            "Concurrent race conflict: slot id=" + slot.getId() + " was booked simultaneously");
+                    throw new BookingConflictException("Parking slot is not available for the requested time");
+                }
+                throw ex;
+            }
+
+            if (metrics != null) {
+                metrics.incrementBookingsCreated();
+            }
+
+            auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CREATED, currentUser.getEmail(),
+                    "Created booking id=" + savedBooking.getId() + " for slot id=" + slot.getId() +
+                            " vehicle id=" + vehicle.getId());
+
+            publishParkingEvent(lot.getId(),
+                    com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
+                            com.smartpark.websocket.ParkingEventType.BOOKING_CREATED,
+                            lot.getId(),
+                            floor.getId(),
+                            slot.getId(),
+                            slot.getSlotNumber(),
+                            slot.getSlotType(),
+                            slot.getStatus(),
+                            savedBooking.getId(),
+                            savedBooking.getStatus(),
+                            savedBooking.getStartTime(),
+                            savedBooking.getEndTime()
+                    ));
+
+            saveOutboxEvent("BOOKING_CREATED", savedBooking);
+
+            return BookingResponse.fromEntity(savedBooking);
+        } finally {
+            if (metrics != null) {
+                metrics.recordBookingCreationTime(System.nanoTime() - startNanos);
+            }
         }
-
-        auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CREATED, currentUser.getEmail(),
-                "Created booking id=" + savedBooking.getId() + " for slot id=" + slot.getId() +
-                        " vehicle id=" + vehicle.getId());
-
-        publishParkingEvent(lot.getId(),
-                com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
-                        com.smartpark.websocket.ParkingEventType.BOOKING_CREATED,
-                        lot.getId(),
-                        floor.getId(),
-                        slot.getId(),
-                        slot.getSlotNumber(),
-                        slot.getSlotType(),
-                        slot.getStatus(),
-                        savedBooking.getId(),
-                        savedBooking.getStatus(),
-                        savedBooking.getStartTime(),
-                        savedBooking.getEndTime()
-                ));
-
-        saveOutboxEvent("BOOKING_CREATED", savedBooking);
-
-        return BookingResponse.fromEntity(savedBooking);
     }
 
     public PageResponse<BookingResponse> getMyBookings(BookingStatus status, int page, int size) {
@@ -305,6 +326,10 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.CANCELLED);
         Booking updatedBooking = bookingRepository.saveAndFlush(booking);
+
+        if (metrics != null) {
+            metrics.incrementBookingsCancelled();
+        }
 
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CANCELLED, currentUser.getEmail(),
                 "Cancelled booking id=" + id);
@@ -397,6 +422,10 @@ public class BookingService {
         booking.setStatus(BookingStatus.COMPLETED);
         Booking updatedBooking = bookingRepository.saveAndFlush(booking);
 
+        if (metrics != null) {
+            metrics.incrementBookingsCompleted();
+        }
+
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_COMPLETED, currentUser.getEmail(),
                 "Completed booking id=" + id);
 
@@ -446,6 +475,10 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.EXPIRED);
         Booking updatedBooking = bookingRepository.saveAndFlush(booking);
+
+        if (metrics != null) {
+            metrics.incrementBookingsExpired();
+        }
 
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_EXPIRED, currentUser.getEmail(),
                 "Expired booking id=" + id);
@@ -514,6 +547,11 @@ public class BookingService {
         }
 
         bookingRepository.flush();
+
+        if (metrics != null) {
+            metrics.incrementBookingsExpired(eligibleBookings.size());
+        }
+
         return eligibleBookings.size();
     }
 

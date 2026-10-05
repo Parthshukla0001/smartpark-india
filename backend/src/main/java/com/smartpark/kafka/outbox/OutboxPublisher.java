@@ -28,6 +28,7 @@ public class OutboxPublisher {
 
     private final OutboxEventRepository outboxEventRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final com.smartpark.observability.SmartParkMetrics metrics;
 
     @Value("${smartpark.kafka.topics.booking-events:smartpark.booking.events}")
     private String bookingEventsTopic = "smartpark.booking.events";
@@ -40,9 +41,16 @@ public class OutboxPublisher {
 
     @org.springframework.beans.factory.annotation.Autowired
     public OutboxPublisher(OutboxEventRepository outboxEventRepository,
-                           KafkaTemplate<String, String> kafkaTemplate) {
+                           KafkaTemplate<String, String> kafkaTemplate,
+                           @org.springframework.beans.factory.annotation.Autowired(required = false) com.smartpark.observability.SmartParkMetrics metrics) {
         this.outboxEventRepository = outboxEventRepository;
         this.kafkaTemplate = kafkaTemplate;
+        this.metrics = metrics;
+    }
+
+    public OutboxPublisher(OutboxEventRepository outboxEventRepository,
+                           KafkaTemplate<String, String> kafkaTemplate) {
+        this(outboxEventRepository, kafkaTemplate, null);
     }
 
     public OutboxPublisher(OutboxEventRepository outboxEventRepository,
@@ -50,8 +58,7 @@ public class OutboxPublisher {
                            String bookingEventsTopic,
                            boolean outboxEnabled,
                            int batchSize) {
-        this.outboxEventRepository = outboxEventRepository;
-        this.kafkaTemplate = kafkaTemplate;
+        this(outboxEventRepository, kafkaTemplate, null);
         this.bookingEventsTopic = bookingEventsTopic;
         this.outboxEnabled = outboxEnabled;
         this.batchSize = batchSize;
@@ -80,25 +87,38 @@ public class OutboxPublisher {
 
         int publishedCount = 0;
         for (OutboxEvent event : pendingEvents) {
-            String key = event.getAggregateId() != null ? String.valueOf(event.getAggregateId()) : null;
+            String correlationId = event.getEventId() != null ? event.getEventId().toString() : java.util.UUID.randomUUID().toString();
+            org.slf4j.MDC.put("correlationId", correlationId);
             try {
-                CompletableFuture<SendResult<String, String>> future =
-                        kafkaTemplate.send(bookingEventsTopic, key, event.getPayload());
+                String key = event.getAggregateId() != null ? String.valueOf(event.getAggregateId()) : null;
+                try {
+                    CompletableFuture<SendResult<String, String>> future =
+                            kafkaTemplate.send(bookingEventsTopic, key, event.getPayload());
 
-                // Wait for broker ACK before updating outbox status
-                future.get(5, TimeUnit.SECONDS);
+                    // Wait for broker ACK before updating outbox status
+                    future.get(5, TimeUnit.SECONDS);
 
-                event.setPublishedAt(Instant.now());
-                event.setLastError(null);
-                publishedCount++;
-                log.debug("Successfully published outbox event {} to topic {}", event.getEventId(), bookingEventsTopic);
-            } catch (Exception e) {
-                event.setAttempts(event.getAttempts() + 1);
-                event.setLastError(e.getMessage());
-                log.warn("Failed to publish outbox event {} to Kafka (attempt {}): {}",
-                        event.getEventId(), event.getAttempts(), e.getMessage());
+                    event.setPublishedAt(Instant.now());
+                    event.setLastError(null);
+                    publishedCount++;
+                    if (metrics != null) {
+                        metrics.incrementOutboxPublished(1);
+                    }
+                    log.debug("Successfully published outbox event {} to topic {}", event.getEventId(), bookingEventsTopic);
+                } catch (Exception e) {
+                    event.setAttempts(event.getAttempts() + 1);
+                    event.setLastError(e.getMessage());
+                    if (metrics != null) {
+                        metrics.incrementOutboxRetries();
+                        metrics.incrementOutboxFailed();
+                    }
+                    log.warn("Failed to publish outbox event {} to Kafka (attempt {}): {}",
+                            event.getEventId(), event.getAttempts(), e.getMessage());
+                }
+                outboxEventRepository.save(event);
+            } finally {
+                org.slf4j.MDC.remove("correlationId");
             }
-            outboxEventRepository.save(event);
         }
 
         outboxEventRepository.flush();

@@ -48,47 +48,54 @@ public class NotificationConsumer {
     )
     @Transactional
     public void consumeBookingEvent(String message) throws JsonProcessingException {
-        log.info("Received Kafka message: {}", message);
-
         BookingKafkaEvent event = objectMapper.readValue(message, BookingKafkaEvent.class);
         if (event == null || event.getEventId() == null) {
             log.warn("Received invalid or null event, skipping");
             return;
         }
 
-        // Idempotency check: guard against duplicate message delivery
-        if (processedEventRepository.existsById(event.getEventId())) {
-            log.info("Event {} of type {} has already been processed. Skipping duplicate.",
-                    event.getEventId(), event.getEventType());
-            return;
-        }
+        String correlationId = event.getEventId().toString();
+        org.slf4j.MDC.put("correlationId", correlationId);
+        try {
+            log.info("Processing Kafka event {} of type {} for booking {}",
+                    event.getEventId(), event.getEventType(), event.getBookingId());
 
-        // Create user notification if user exists
-        if (event.getUserId() != null) {
-            Optional<User> userOptional = userRepository.findById(event.getUserId());
-            if (userOptional.isPresent()) {
-                User user = userOptional.get();
-                String notificationMessage = buildNotificationMessage(event);
-                Notification notification = new Notification(
-                        user,
-                        event.getEventId(),
-                        event.getEventType(),
-                        notificationMessage
-                );
-                notificationRepository.save(notification);
-                log.debug("Saved notification for user id={}", user.getId());
-            } else {
-                log.warn("User id={} not found for event {}, notification skipped",
-                        event.getUserId(), event.getEventId());
+            // Idempotency check: guard against duplicate message delivery
+            if (processedEventRepository.existsById(event.getEventId())) {
+                log.info("Event {} of type {} has already been processed. Skipping duplicate.",
+                        event.getEventId(), event.getEventType());
+                return;
             }
+
+            // Create user notification if user exists
+            if (event.getUserId() != null) {
+                Optional<User> userOptional = userRepository.findById(event.getUserId());
+                if (userOptional.isPresent()) {
+                    User user = userOptional.get();
+                    String notificationMessage = buildNotificationMessage(event);
+                    Notification notification = new Notification(
+                            user,
+                            event.getEventId(),
+                            event.getEventType(),
+                            notificationMessage
+                    );
+                    notificationRepository.save(notification);
+                    log.debug("Saved notification for user id={}", user.getId());
+                } else {
+                    log.warn("User id={} not found for event {}, notification skipped",
+                            event.getUserId(), event.getEventId());
+                }
+            }
+
+            // Mark event as processed atomically in the same database transaction
+            ProcessedEvent processedEvent = new ProcessedEvent(event.getEventId(), event.getEventType());
+            processedEventRepository.save(processedEvent);
+
+            log.info("Successfully processed event {} of type {} for booking {}",
+                    event.getEventId(), event.getEventType(), event.getBookingId());
+        } finally {
+            org.slf4j.MDC.remove("correlationId");
         }
-
-        // Mark event as processed atomically in the same database transaction
-        ProcessedEvent processedEvent = new ProcessedEvent(event.getEventId(), event.getEventType());
-        processedEventRepository.save(processedEvent);
-
-        log.info("Successfully processed event {} of type {} for booking {}",
-                event.getEventId(), event.getEventType(), event.getBookingId());
     }
 
     private String buildNotificationMessage(BookingKafkaEvent event) {

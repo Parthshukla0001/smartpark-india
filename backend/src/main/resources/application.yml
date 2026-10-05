@@ -48,7 +48,21 @@ management:
         include: health,info,metrics
   endpoint:
     health:
-      show-details: always
+      show-details: when_authorized
+      roles: ADMIN
+    env:
+      enabled: false
+    configprops:
+      enabled: false
+  health:
+    redis:
+      enabled: false
+    kafka:
+      enabled: false
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{correlationId}] %-5level %logger{36} - %msg%n"
 
 app:
   jwt:

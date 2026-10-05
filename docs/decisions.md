@@ -592,6 +592,82 @@ Key performance bottlenecks were identified:
 - **Negative:**
   - Four new secondary indexes slightly increase write amplification during booking creation (mitigated by partial filtering on active statuses for `idx_bookings_active_slot_times`).
 
+---
+
+## ADR 016: Application Observability, Metrics, Health Checks & Structured Logging
+
+### Context
+SmartPark India handles high-concurrency booking reservations, distributed caching, rate limiting, WebSockets, and asynchronous Kafka event processing. To diagnose application availability, slow requests, intermittent failures, and background job health without excessive performance overhead or security exposure, a robust observability architecture is required.
+
+Key concerns:
+1. **Actuator Security**: Actuator endpoints must not expose sensitive configuration, environment variables, internal topology, or allow unauthorized administration.
+2. **Health Check Resilience**: Not all dependencies are equally critical. If a non-critical infrastructure dependency experiences temporary degradation, the application should report its degraded state without taking down the entire service or causing container restarts.
+3. **Metric Cardinality**: High-cardinality labels (such as user email, user ID, booking ID, IP address, or JWT) in Prometheus/Micrometer metrics can trigger exponential time-series explosion, degrading memory and registry scrape performance.
+4. **End-to-End Tracing**: Incoming HTTP requests and asynchronous Kafka events must be correlated across log statements to facilitate fast issue diagnosis and audit tracking.
+5. **Information Security**: Error responses and structured logs must never expose stack traces, database credentials, passwords, or authentication tokens.
+
+### Decision
+
+1. **Spring Boot Actuator Exposure & Access Control**:
+   - Exposed endpoints: `health`, `info`, and `metrics`.
+   - Endpoints `env`, `configprops`, and heap dumps are strictly disabled (`enabled: false`).
+   - Endpoint RBAC in `SecurityConfig`:
+     - `/actuator/health` and `/actuator/info` are public (`permitAll()`).
+     - All other actuator endpoints (`/actuator/**`, including `/actuator/metrics`) require `hasRole('ADMIN')`.
+   - Sanitized Health Details: `management.endpoint.health.show-details: when_authorized` with `roles: ADMIN`. Unauthenticated public health checks receive only high-level status `{"status":"UP"}` without leaking internal hostnames, databases, or connection pools. Authenticated admins receive complete component breakdowns.
+
+2. **Dependency Classification for Health Checks**:
+   - **PostgreSQL (`db`) — CRITICAL**:
+     - Managed via Spring Boot's built-in `DataSourceHealthIndicator`.
+     - Core ACID entity persistence, concurrency locks, and the transactional outbox depend entirely on PostgreSQL. If PostgreSQL is unreachable, the application is non-functional and reports `DOWN`.
+   - **Redis (`redis`) — NON-CRITICAL / FAIL-OPEN**:
+     - Custom `SmartParkRedisHealthIndicator`.
+     - SmartPark uses Redis for read-through caching and rate limiting. In the event of Redis downtime, caching is bypassed to PostgreSQL and rate limiting fails open. Unavailability reports `UP` with `{"status":"DEGRADED","mode":"FAIL_OPEN"}` so container liveness probes remain stable.
+   - **Apache Kafka (`kafka`) — NON-CRITICAL / OUTBOX_BUFFERED**:
+     - Custom `SmartParkKafkaHealthIndicator`.
+     - SmartPark employs the Transactional Outbox pattern where business events are persisted in PostgreSQL before Kafka delivery. If Kafka brokers are unreachable, bookings continue uninterrupted and events buffer safely in `outbox_events`. Unavailability reports `UP` with `{"status":"DEGRADED","mode":"OUTBOX_BUFFERED"}`.
+
+3. **Micrometer Business & Operational Metrics**:
+   - Centralized in `SmartParkMetrics`:
+     - `smartpark.bookings.created` (Counter)
+     - `smartpark.bookings.cancelled` (Counter)
+     - `smartpark.bookings.completed` (Counter)
+     - `smartpark.bookings.expired` (Counter)
+     - `smartpark.bookings.conflicts` (Counter)
+     - `smartpark.rate_limit.rejected` (Counter)
+     - `smartpark.outbox.published` (Counter)
+     - `smartpark.outbox.failed` (Counter)
+     - `smartpark.outbox.retries` (Counter)
+     - `smartpark.bookings.creation.time` (Timer)
+   - **Strict Zero High-Cardinality Guarantee**: NEVER includes user ID, user email, booking ID, IP address, or JWT tokens in metric labels. All metrics use zero labels or strictly bounded enums (e.g. slot types).
+
+4. **Correlation ID Tracking & Propagation**:
+   - `CorrelationIdFilter` (`OncePerRequestFilter`, highest precedence in filter chain before JWT filter).
+   - Validates client `X-Correlation-ID` header against `^[a-zA-Z0-9_-]{1,64}$` to prevent header injection or memory bloat. Generates a fresh `UUID` if missing or invalid.
+   - Binds correlation ID to SLF4J MDC (`correlationId`), echoes in HTTP response header `X-Correlation-ID`, and guarantees cleanup in a `finally` block (`MDC.remove("correlationId")`).
+   - CORS headers configured to allow and expose `X-Correlation-ID`.
+   - Async propagation:
+     - Kafka consumers bind the domain `eventId` into MDC for all event processing logs.
+     - Scheduled jobs bind an operation ID (e.g. `sched-expiry-...`) into MDC.
+
+5. **Structured Logging & Safe Error Handling**:
+   - Console logging pattern updated to: `%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{correlationId}] %-5level %logger{36} - %msg%n`.
+   - `GlobalExceptionHandler` ensures unexpected 500 exceptions log root causes with correlation IDs while returning sanitized `ErrorResponse` objects with zero stack traces or internal secrets.
+   - Existing `SecurityAuditLogger` retained for tamper-evident security audit trails (`[AUDIT]`).
+
+6. **Monitoring Platform Deferral**:
+   - Prometheus and Grafana are deferred. Micrometer and Spring Boot Actuator provide native metric exposition out of the box with zero additional external infrastructure containers. A Prometheus scrape exporter or collector agent can be connected in future deployment phases without altering application code.
+
+### Consequences
+- **Positive:**
+  - Diagnostic visibility across booking lifecycles, conflicts, rate limiting, and outbox delivery.
+  - Zero risk of metric cardinality explosion.
+  - End-to-end request correlation across synchronous HTTP and asynchronous Kafka consumers.
+  - Non-critical dependencies do not trigger false-positive container restarts.
+  - Sensitive internal architecture details and credentials are protected from unauthenticated access.
+- **Negative:**
+  - Slight latency overhead (~0.05ms) for correlation ID filter and MDC context switching.
+
 
 
 

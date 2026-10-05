@@ -555,7 +555,7 @@ class WebSocketParkingUpdatesIntegrationTests {
 
         Thread.sleep(300);
 
-        Instant start = Instant.now(clock).plus(12, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        Instant start = Instant.now(clock).plus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
         Instant end = start.plus(1, ChronoUnit.HOURS);
 
         org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(

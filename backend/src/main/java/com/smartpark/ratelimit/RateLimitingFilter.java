@@ -21,15 +21,31 @@ import java.io.IOException;
  * Distinguishes authenticated users (by principal name) from unauthenticated clients (by client IP).
  * When rate limit is exceeded, returns HTTP 429 Too Many Requests with a Retry-After header.
  */
+import com.smartpark.observability.SmartParkMetrics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+
 @Component
 public class RateLimitingFilter extends OncePerRequestFilter {
 
+    private static final Logger log = LoggerFactory.getLogger(RateLimitingFilter.class);
+
     private final RedisRateLimiter rateLimiter;
     private final ObjectMapper objectMapper;
+    private final SmartParkMetrics metrics;
 
-    public RateLimitingFilter(RedisRateLimiter rateLimiter, ObjectMapper objectMapper) {
+    @Autowired
+    public RateLimitingFilter(RedisRateLimiter rateLimiter,
+                              ObjectMapper objectMapper,
+                              @Autowired(required = false) SmartParkMetrics metrics) {
         this.rateLimiter = rateLimiter;
         this.objectMapper = objectMapper;
+        this.metrics = metrics;
+    }
+
+    public RateLimitingFilter(RedisRateLimiter rateLimiter, ObjectMapper objectMapper) {
+        this(rateLimiter, objectMapper, null);
     }
 
     @Override
@@ -59,6 +75,12 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         response.setHeader("X-RateLimit-Remaining", String.valueOf(Math.max(0, result.limit() - result.currentCount())));
 
         if (!result.allowed()) {
+            if (metrics != null) {
+                metrics.incrementRateLimitRejected();
+            }
+            log.warn("Rate limit exceeded for path={} (limit={}, retryAfter={}s)",
+                    request.getRequestURI(), result.limit(), result.retryAfterSeconds());
+
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
             response.setHeader("Retry-After", String.valueOf(result.retryAfterSeconds()));
             response.setHeader("X-RateLimit-Reset", String.valueOf(result.retryAfterSeconds()));

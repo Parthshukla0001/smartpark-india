@@ -30,6 +30,8 @@ public class BookingExpiryScheduler {
 
     @Scheduled(fixedDelayString = "${smartpark.booking.expiry-check-interval-ms:60000}")
     public void processExpiredBookings() {
+        String correlationId = "sched-expiry-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        org.slf4j.MDC.put("correlationId", correlationId);
         try {
             Instant now = Instant.now(clock);
             int expiredCount = bookingService.expireEligibleBookings(now);
@@ -38,6 +40,8 @@ public class BookingExpiryScheduler {
             }
         } catch (Exception ex) {
             log.error("Error during scheduled booking expiry execution", ex);
+        } finally {
+            org.slf4j.MDC.remove("correlationId");
         }
     }
 }

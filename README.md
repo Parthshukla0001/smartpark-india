@@ -2,7 +2,7 @@
 
 **India-Focused Smart Parking Management Platform**
 
-> Currently implemented: **Phase 10 — Database Query Optimization & Performance Analysis**
+> Currently implemented: **Phase 11 — Observability, Metrics, Health Checks & Structured Logging**
 
 SmartPark India is an enterprise-grade smart parking management platform designed specifically for the Indian market. It provides real-time parking availability, slot booking and reservations, payment integration, and administrative dashboards for parking operators and drivers.
 
@@ -23,7 +23,8 @@ SmartPark India is an enterprise-grade smart parking management platform designe
 | **Phase 8 — Real-Time Parking Updates (WebSockets)** | Spring WebSocket + STOMP, `/ws` endpoint, `/topic/parking-lots/{lotId}`, JWT STOMP auth, Post-commit event dispatch; 121 automated tests | ✅ Complete |
 | **Phase 9 — Asynchronous Event Processing (Kafka & Outbox)** | Apache Kafka 3.8 (KRaft), Transactional Outbox Pattern, `FOR UPDATE SKIP LOCKED` poller, Idempotent consumer (`processed_events`), Retry & Dead Letter Topic (`DLT`), Notification dispatch; 129 automated tests | ✅ Complete |
 | **Phase 10 — Query Optimization & Performance Analysis** | EXPLAIN ANALYZE measurement, N+1 query elimination via `@EntityGraph`, Composite & functional indexes (`V5`), In-memory sort removal, Paginated notification querying; 136 automated tests | ✅ Complete |
-| **Phase 11 — Payments & Integrations** | UPI / Payment Gateway integration, Webhooks, Reconciliation | 🔜 Planned |
+| **Phase 11 — Observability, Metrics, Health & Logging** | Spring Boot Actuator, Micrometer custom business metrics, Zero high-cardinality labels, Critical vs. Non-critical health checks (Postgres/Redis/Kafka), Correlation ID filter (`X-Correlation-ID`) & MDC tracing, Sanitized structured logging; 150 automated tests | ✅ Complete |
+| **Phase 12 — Payments & Integrations** | UPI / Payment Gateway integration, Webhooks, Reconciliation | 🔜 Planned |
 
 ---
 
@@ -170,20 +171,23 @@ The frontend is available at **http://localhost:5173**.
 
 ---
 
-## 🏥 Verification Endpoints
+## 🏥 Observability & Verification Endpoints
 
-| Endpoint | Method | Expected Output | Purpose |
-|---|---|---|---|
-| `/api/health` | `GET` | `{"status":"UP","service":"smartpark-backend"}` | Custom API health probe |
-| `/actuator/health` | `GET` | `{"status":"UP", "components":{"db":{"status":"UP"}}}` | Actuator health & PostgreSQL connection check |
+| Endpoint | Method | Auth / Role | Expected Output | Purpose |
+|---|---|---|---|---|
+| `/api/health` | `GET` | Public | `{"status":"UP","service":"smartpark-backend"}` | High-level API health probe (echoes `X-Correlation-ID`) |
+| `/actuator/health` | `GET` | Public | `{"status":"UP"}` | Sanitized Actuator health probe (no internal topology leaked) |
+| `/actuator/health` | `GET` | `ROLE_ADMIN` | `{"status":"UP","components":{"db":...,"redis":...,"kafka":...}}` | Full health breakdown across critical & non-critical dependencies |
+| `/actuator/metrics` | `GET` | `ROLE_ADMIN` | `{"names":["smartpark.bookings.created",...]}` | Micrometer metrics catalogue |
+| `/actuator/metrics/{metricName}` | `GET` | `ROLE_ADMIN` | `{"name":"smartpark.bookings.created","measurements":[...]}` | Specific metric value inspection |
 
 ---
 
-## ⚠️ Current Phase 8 Boundaries
- 
+## ⚠️ Current Phase 11 Boundaries
+
 The following areas are intentionally reserved for upcoming phases:
-- Payment gateway integration (UPI, cards, net banking)
-- Kafka event streaming & distributed observability
+- Payment gateway integration (UPI, cards, net banking, webhooks)
+- Centralized external monitoring stack (Prometheus agent, Grafana dashboards)
 - Production Docker orchestration and CI/CD pipelines
 
 

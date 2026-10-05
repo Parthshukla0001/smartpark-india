@@ -1,5 +1,6 @@
 package com.smartpark.config;
 
+import com.smartpark.observability.CorrelationIdFilter;
 import com.smartpark.ratelimit.RateLimitingFilter;
 import com.smartpark.security.jwt.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletResponse;
@@ -34,15 +35,18 @@ import java.util.List;
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    private final CorrelationIdFilter correlationIdFilter;
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final RateLimitingFilter rateLimitingFilter;
     private final List<String> allowedOrigins;
 
     public SecurityConfig(
+            CorrelationIdFilter correlationIdFilter,
             JwtAuthenticationFilter jwtAuthFilter,
             RateLimitingFilter rateLimitingFilter,
             @Value("${app.cors.allowed-origins:http://localhost:5173}") String allowedOriginsStr
     ) {
+        this.correlationIdFilter = correlationIdFilter;
         this.jwtAuthFilter = jwtAuthFilter;
         this.rateLimitingFilter = rateLimitingFilter;
         this.allowedOrigins = Arrays.stream(allowedOriginsStr.split(","))
@@ -61,11 +65,14 @@ public class SecurityConfig {
                         // Public endpoints
                         .requestMatchers(
                                 "/api/health",
-                                "/actuator/**",
+                                "/actuator/health",
+                                "/actuator/info",
                                 "/api/auth/register",
                                 "/api/auth/login",
                                 "/ws/**"
                         ).permitAll()
+                        // Protected Actuator endpoints require ADMIN role
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
                         // All other application APIs require valid authentication
                         .anyRequest().authenticated()
                 )
@@ -76,6 +83,8 @@ public class SecurityConfig {
                 )
                 // Establish JWT authentication before UsernamePasswordAuthenticationFilter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // Establish correlation ID tracking before JWT authentication
+                .addFilterBefore(correlationIdFilter, JwtAuthenticationFilter.class)
                 // Establish distributed rate limiting after JWT identity resolution
                 .addFilterAfter(rateLimitingFilter, JwtAuthenticationFilter.class);
 
@@ -98,8 +107,8 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
-        configuration.setExposedHeaders(List.of("Authorization"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-Correlation-ID"));
+        configuration.setExposedHeaders(List.of("Authorization", "X-Correlation-ID"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
