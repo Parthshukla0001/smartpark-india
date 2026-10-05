@@ -1,5 +1,6 @@
 package com.smartpark.config;
 
+import com.smartpark.ratelimit.RateLimitingFilter;
 import com.smartpark.security.jwt.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,13 +35,16 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final RateLimitingFilter rateLimitingFilter;
     private final List<String> allowedOrigins;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthFilter,
+            RateLimitingFilter rateLimitingFilter,
             @Value("${app.cors.allowed-origins:http://localhost:5173}") String allowedOriginsStr
     ) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.rateLimitingFilter = rateLimitingFilter;
         this.allowedOrigins = Arrays.stream(allowedOriginsStr.split(","))
                 .map(String::trim)
                 .toList();
@@ -70,10 +74,13 @@ public class SecurityConfig {
                         .accessDeniedHandler(customAccessDeniedHandler())
                 )
                 // Establish JWT authentication before UsernamePasswordAuthenticationFilter
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // Establish distributed rate limiting after JWT identity resolution
+                .addFilterAfter(rateLimitingFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }
+
 
     @Bean
     public PasswordEncoder passwordEncoder() {

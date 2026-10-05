@@ -348,6 +348,82 @@ Phase 6 requires robust booking lifecycle management across the defined lifecycl
 - **Negative:**
   - Scheduler runs within application process memory; distributed scheduling coordinators (e.g. ShedLock) will be added when multi-instance production clustering is deployed.
 
+---
+
+## ADR 012: Redis Cache-Aside Strategy and Distributed API Rate Limiting
+
+### Status
+Accepted
+
+### Context
+Phase 7 introduces Redis to optimize read performance and enforce distributed API traffic governance:
+1. Parking infrastructure data (parking lots, floors, and slots) is read-heavy and relatively static compared to dynamic booking transactions. Repeatedly hitting PostgreSQL for static facility metadata adds unnecessary database load and latency.
+2. Unprotected endpoints are vulnerable to burst abuse and DoS attacks. In-memory JVM rate limiters (e.g. Guava RateLimiter or `ConcurrentHashMap`) fail in multi-instance horizontally scaled deployments and drop state on restarts.
+3. Crucially, relational booking consistency, GiST exclusion constraints, and transactional lifecycle invariants from Phases 1–6 must remain strictly within PostgreSQL and must not be delegated to eventual-consistency caches.
+
+### Decision
+1. **Cache-Aside Pattern for Read-Heavy Parking Data**:
+   - Implemented `ParkingCacheService` wrapping Redis operations with Jackson JSON serialization.
+   - **Cache Keys**:
+     - Single Lot: `parking-lot:{id}` (TTL: `smartpark.cache.parking-lot-ttl-seconds`, default 300s).
+     - Paginated Lots: `parking-lots:{city}:{active}:{page}:{size}`.
+     - Floor Slots: `parking-slots:{lotId}:{floorId}` (TTL: `smartpark.cache.parking-slot-ttl-seconds`, default 120s).
+     - Single Slot: `parking-slot:{lotId}:{floorId}:{slotId}`.
+   - **Flow**: Service checks Redis first; on cache miss, fetches from PostgreSQL and asynchronously populates Redis with the configured TTL.
+
+2. **Strict Post-Commit Cache Invalidation**:
+   - Cache invalidations are deferred until database transactions have successfully committed using Spring's `TransactionSynchronizationManager.registerSynchronization()` with `afterCommit()`:
+     ```java
+     TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+         @Override
+         public void afterCommit() {
+             redisTemplate.delete(key);
+         }
+     });
+     ```
+   - This prevents race conditions where a concurrent read could re-cache uncommitted dirty data or where cache is invalidated despite a transaction rollback.
+
+3. **PostgreSQL Preserved as Authoritative Source of Truth**:
+   - Redis is strictly prohibited from managing booking availability, slot reservations, or double-booking locks.
+   - PostgreSQL GiST exclusion constraints (`uq_bookings_no_overlapping_active_slots`) and pessimistic slot row locking (`PESSIMISTIC_WRITE`) remain the sole authoritative arbiters of booking correctness.
+
+4. **Distributed Atomic Fixed-Window Rate Limiter**:
+   - Implemented `RedisRateLimiter` utilizing an atomic Lua script:
+     ```lua
+     local current = redis.call('INCR', key)
+     if current == 1 then
+         redis.call('EXPIRE', key, window)
+     end
+     local ttl = redis.call('TTL', key)
+     return {current, ttl}
+     ```
+   - Guarantees zero race conditions on counter increment and expiration setup without distributed lock overhead.
+   - **Traffic Segmentation**:
+     - Authenticated requests key on `rate-limit:user:{username}` with higher quota (`authenticated-limit`, default 500 req/min).
+     - Unauthenticated requests key on `rate-limit:ip:{clientIp}` (inspecting `X-Forwarded-For` with fallback to `remoteAddr`) with tighter quota (`unauthenticated-limit`, default 200 req/min).
+   - **Filter & HTTP Semantics**:
+     - `RateLimitingFilter` sits in the filter chain immediately after `JwtAuthenticationFilter`.
+     - Excludes actuator and `/api/health` probes.
+     - Adds `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers to every response.
+     - On limit exceeded, immediately halts filter execution and emits HTTP 429 Too Many Requests with a `Retry-After` header and structured JSON error payload.
+
+5. **Fail-Open Resiliency and Graceful Degradation**:
+   - If Redis becomes unreachable, network times out, or encounters errors:
+     - `ParkingCacheService` catches all exceptions, logs a warning, and falls back to PostgreSQL reads without failing user requests.
+     - `RedisRateLimiter` applies `smartpark.rate-limit.fail-open: true`, allowing legitimate application traffic to continue unimpeded during Redis maintenance or outages.
+
+### Consequences
+- **Positive:**
+  - Sub-millisecond read response times for cached parking facility queries.
+  - Zero risk of stale cache reads from rolled-back database transactions.
+  - Horizontally scalable API rate limiting with atomic guarantees and zero local JVM state.
+  - PostgreSQL transaction and exclusion constraint guarantees remain completely intact.
+  - System remains fully operational even if the Redis cluster suffers complete temporary outage.
+- **Negative:**
+  - Extra network hop to Redis on cache reads and rate limit checks.
+  - Cache memory usage must be monitored, controlled by Redis TTL policies.
+
+
 
 
 

@@ -21,6 +21,12 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
     open-in-view: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
 
 management:
   endpoints:
@@ -47,5 +53,15 @@ smartpark:
     expiry-check-interval-ms: 60000
     expiry-scheduler:
       enabled: true
+  cache:
+    enabled: ${CACHE_ENABLED:true}
+    parking-lot-ttl-seconds: ${CACHE_PARKING_LOT_TTL:300}
+    parking-slot-ttl-seconds: ${CACHE_PARKING_SLOT_TTL:120}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    window-seconds: ${RATE_LIMIT_WINDOW_SECONDS:60}
+    authenticated-limit: ${RATE_LIMIT_AUTH_LIMIT:500}
+    unauthenticated-limit: ${RATE_LIMIT_UNAUTH_LIMIT:200}
+    fail-open: ${RATE_LIMIT_FAIL_OPEN:true}
 
 

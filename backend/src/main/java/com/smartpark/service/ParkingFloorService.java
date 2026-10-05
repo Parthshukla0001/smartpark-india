@@ -25,17 +25,20 @@ public class ParkingFloorService {
     private final ParkingSlotRepository parkingSlotRepository;
     private final CurrentUserService currentUserService;
     private final SecurityAuditLogger auditLogger;
+    private final com.smartpark.cache.ParkingCacheService parkingCacheService;
 
     public ParkingFloorService(ParkingFloorRepository parkingFloorRepository,
                                ParkingLotService parkingLotService,
                                ParkingSlotRepository parkingSlotRepository,
                                CurrentUserService currentUserService,
-                               SecurityAuditLogger auditLogger) {
+                               SecurityAuditLogger auditLogger,
+                               com.smartpark.cache.ParkingCacheService parkingCacheService) {
         this.parkingFloorRepository = parkingFloorRepository;
         this.parkingLotService = parkingLotService;
         this.parkingSlotRepository = parkingSlotRepository;
         this.currentUserService = currentUserService;
         this.auditLogger = auditLogger;
+        this.parkingCacheService = parkingCacheService;
     }
 
     @Transactional
@@ -107,6 +110,8 @@ public class ParkingFloorService {
         }
 
         parkingFloorRepository.delete(floor);
+
+        parkingCacheService.evictFloorSlots(lotId, floorId);
 
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_FLOOR_DELETED, userEmail,

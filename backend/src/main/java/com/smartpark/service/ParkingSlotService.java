@@ -1,5 +1,6 @@
 package com.smartpark.service;
 
+import com.smartpark.cache.ParkingCacheService;
 import com.smartpark.dto.parking.CreateParkingSlotRequest;
 import com.smartpark.dto.parking.ParkingSlotResponse;
 import com.smartpark.dto.parking.UpdateParkingSlotRequest;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @Transactional(readOnly = true)
@@ -26,18 +28,22 @@ public class ParkingSlotService {
     private final ParkingLotService parkingLotService;
     private final CurrentUserService currentUserService;
     private final SecurityAuditLogger auditLogger;
+    private final ParkingCacheService parkingCacheService;
 
     public ParkingSlotService(ParkingSlotRepository parkingSlotRepository,
                               ParkingFloorService parkingFloorService,
                               ParkingLotService parkingLotService,
                               CurrentUserService currentUserService,
-                              SecurityAuditLogger auditLogger) {
+                              SecurityAuditLogger auditLogger,
+                              ParkingCacheService parkingCacheService) {
         this.parkingSlotRepository = parkingSlotRepository;
         this.parkingFloorService = parkingFloorService;
         this.parkingLotService = parkingLotService;
         this.currentUserService = currentUserService;
         this.auditLogger = auditLogger;
+        this.parkingCacheService = parkingCacheService;
     }
+
 
     @Transactional
     public ParkingSlotResponse createSlot(Long lotId, Long floorId, CreateParkingSlotRequest request) {
@@ -55,6 +61,8 @@ public class ParkingSlotService {
         ParkingSlot slot = new ParkingSlot(floor, normalizedSlotNumber, request.getSlotType(), SlotStatus.AVAILABLE);
         ParkingSlot savedSlot = parkingSlotRepository.save(slot);
 
+        parkingCacheService.evictFloorSlots(lotId, floorId);
+
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_SLOT_CREATED, userEmail,
                 "Created slot id=" + savedSlot.getId() + " number='" + savedSlot.getSlotNumber() +
@@ -66,13 +74,27 @@ public class ParkingSlotService {
     public List<ParkingSlotResponse> getSlotsByFloorId(Long lotId, Long floorId) {
         parkingFloorService.validateAndGetFloor(lotId, floorId);
 
+        Optional<List<ParkingSlotResponse>> cached = parkingCacheService.getSlotsByFloor(lotId, floorId);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
         List<ParkingSlot> slots = parkingSlotRepository.findByParkingFloorIdOrderBySlotNumberAsc(floorId);
-        return slots.stream().map(ParkingSlotResponse::fromEntity).toList();
+        List<ParkingSlotResponse> responses = slots.stream().map(ParkingSlotResponse::fromEntity).toList();
+        parkingCacheService.putSlotsByFloor(lotId, floorId, responses);
+        return responses;
     }
 
     public ParkingSlotResponse getSlotById(Long lotId, Long floorId, Long slotId) {
+        Optional<ParkingSlotResponse> cached = parkingCacheService.getSlot(lotId, floorId, slotId);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
         ParkingSlot slot = validateAndGetSlot(lotId, floorId, slotId);
-        return ParkingSlotResponse.fromEntity(slot);
+        ParkingSlotResponse response = ParkingSlotResponse.fromEntity(slot);
+        parkingCacheService.putSlot(lotId, floorId, slotId, response);
+        return response;
     }
 
     @Transactional
@@ -93,6 +115,8 @@ public class ParkingSlotService {
 
         ParkingSlot updatedSlot = parkingSlotRepository.save(slot);
 
+        parkingCacheService.evictSlot(lotId, floorId, slotId);
+
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_SLOT_UPDATED, userEmail,
                 "Updated slot id=" + updatedSlot.getId() + " number='" + updatedSlot.getSlotNumber() +
@@ -109,6 +133,8 @@ public class ParkingSlotService {
         slot.setStatus(request.getStatus());
         ParkingSlot updatedSlot = parkingSlotRepository.save(slot);
 
+        parkingCacheService.evictSlot(lotId, floorId, slotId);
+
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_SLOT_STATUS_CHANGED, userEmail,
                 "Updated slot status id=" + updatedSlot.getId() + " to " + updatedSlot.getStatus());
@@ -124,6 +150,8 @@ public class ParkingSlotService {
         // Safe soft-deactivation to preserve historical booking references
         slot.setStatus(SlotStatus.OUT_OF_SERVICE);
         parkingSlotRepository.save(slot);
+
+        parkingCacheService.evictSlot(lotId, floorId, slotId);
 
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_SLOT_DEACTIVATED, userEmail,

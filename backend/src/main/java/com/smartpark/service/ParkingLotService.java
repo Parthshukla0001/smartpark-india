@@ -1,5 +1,6 @@
 package com.smartpark.service;
 
+import com.smartpark.cache.ParkingCacheService;
 import com.smartpark.dto.common.PageResponse;
 import com.smartpark.dto.parking.CreateParkingLotRequest;
 import com.smartpark.dto.parking.ParkingLotResponse;
@@ -20,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -35,14 +37,18 @@ public class ParkingLotService {
     private final ParkingLotRepository parkingLotRepository;
     private final CurrentUserService currentUserService;
     private final SecurityAuditLogger auditLogger;
+    private final ParkingCacheService parkingCacheService;
 
     public ParkingLotService(ParkingLotRepository parkingLotRepository,
                               CurrentUserService currentUserService,
-                              SecurityAuditLogger auditLogger) {
+                              SecurityAuditLogger auditLogger,
+                              ParkingCacheService parkingCacheService) {
         this.parkingLotRepository = parkingLotRepository;
         this.currentUserService = currentUserService;
         this.auditLogger = auditLogger;
+        this.parkingCacheService = parkingCacheService;
     }
+
 
     @Transactional
     public ParkingLotResponse createParkingLot(CreateParkingLotRequest request) {
@@ -66,6 +72,8 @@ public class ParkingLotService {
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_LOT_CREATED, userEmail,
                 "Created parking lot id=" + savedLot.getId() + " name='" + savedLot.getName() + "' in " + savedLot.getCity());
+
+        parkingCacheService.evictAllParkingLots();
 
         return ParkingLotResponse.fromEntity(savedLot);
     }
@@ -98,6 +106,19 @@ public class ParkingLotService {
 
         Boolean effectiveActive = isDriver ? Boolean.TRUE : active;
 
+        // Check cache-aside before hitting PostgreSQL
+        String cacheKey = "city=" + (city != null ? city.trim().toLowerCase() : "") +
+                ":state=" + (state != null ? state.trim().toLowerCase() : "") +
+                ":pincode=" + (pincode != null ? pincode.trim() : "") +
+                ":active=" + effectiveActive +
+                ":page=" + page + ":size=" + size +
+                ":sort=" + sortField + ":" + direction;
+
+        Optional<PageResponse<ParkingLotResponse>> cachedPage = parkingCacheService.getParkingLotsPage(cacheKey);
+        if (cachedPage.isPresent()) {
+            return cachedPage.get();
+        }
+
         Specification<ParkingLot> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -118,24 +139,41 @@ public class ParkingLotService {
         };
 
         Page<ParkingLot> parkingLotPage = parkingLotRepository.findAll(spec, pageable);
-        Page<ParkingLotResponse> responsePage = parkingLotPage.map(ParkingLotResponse::fromEntity);
+        Page<ParkingLotResponse> mappedPage = parkingLotPage.map(ParkingLotResponse::fromEntity);
+        PageResponse<ParkingLotResponse> responsePage = PageResponse.from(mappedPage);
 
-        return PageResponse.from(responsePage);
+        // Populate cache for subsequent reads
+        parkingCacheService.putParkingLotsPage(cacheKey, responsePage);
+
+        return responsePage;
     }
 
     public ParkingLotResponse getParkingLotById(Long id) {
-        ParkingLot lot = parkingLotRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Parking lot not found with id: " + id));
-
         boolean isDriver = currentUserService.getCurrentPrincipal()
                 .map(p -> p.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_DRIVER")))
                 .orElse(false);
+
+        // Check cache-aside before hitting PostgreSQL
+        Optional<ParkingLotResponse> cached = parkingCacheService.getParkingLot(id);
+        if (cached.isPresent()) {
+            ParkingLotResponse lot = cached.get();
+            if (isDriver && !lot.isActive()) {
+                throw new ResourceNotFoundException("Parking lot not found with id: " + id);
+            }
+            return lot;
+        }
+
+        ParkingLot lot = parkingLotRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Parking lot not found with id: " + id));
 
         if (isDriver && !lot.isActive()) {
             throw new ResourceNotFoundException("Parking lot not found with id: " + id);
         }
 
-        return ParkingLotResponse.fromEntity(lot);
+        ParkingLotResponse response = ParkingLotResponse.fromEntity(lot);
+        parkingCacheService.putParkingLot(id, response);
+
+        return response;
     }
 
     @Transactional
@@ -165,6 +203,9 @@ public class ParkingLotService {
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_LOT_UPDATED, userEmail,
                 "Updated parking lot id=" + updatedLot.getId() + " name='" + updatedLot.getName() + "' active=" + updatedLot.isActive());
 
+        // Invalidate affected cache entries after commit
+        parkingCacheService.evictParkingLot(id);
+
         return ParkingLotResponse.fromEntity(updatedLot);
     }
 
@@ -179,7 +220,11 @@ public class ParkingLotService {
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_LOT_DEACTIVATED, userEmail,
                 "Deactivated parking lot id=" + lot.getId() + " name='" + lot.getName() + "'");
+
+        // Invalidate affected cache entries after commit
+        parkingCacheService.evictParkingLot(id);
     }
+
 
     public ParkingLot getActiveParkingLotEntity(Long id) {
         ParkingLot lot = parkingLotRepository.findById(id)
