@@ -73,6 +73,8 @@ public class SecurityConfig {
                         ).permitAll()
                         // Protected Actuator endpoints require ADMIN role
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
+                        // Protected Admin endpoints require ADMIN role
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         // All other application APIs require valid authentication
                         .anyRequest().authenticated()
                 )

@@ -15,7 +15,6 @@ interface AuthContextType {
     email: string;
     password: string;
     phoneNumber?: string;
-    role?: string;
   }) => Promise<any>;
   logout: () => void;
 }
@@ -73,7 +72,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: string;
     password: string;
     phoneNumber?: string;
-    role?: string;
   }) => {
     return authApi.register(data);
   };

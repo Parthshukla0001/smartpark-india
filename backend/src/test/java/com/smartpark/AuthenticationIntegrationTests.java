@@ -268,4 +268,56 @@ class AuthenticationIntegrationTests {
                 .andExpect(jsonPath("$.status", is("UP")))
                 .andExpect(jsonPath("$.service", is("smartpark-backend")));
     }
+
+    @Test
+    @DisplayName("12. Malicious public registration payload with role=ADMIN still creates DRIVER account")
+    void testMaliciousRegistrationRoleAdminIgnored() throws Exception {
+        String json = """
+            {
+                "firstName": "Attacker",
+                "lastName": "Admin",
+                "email": "attacker.admin@example.in",
+                "phoneNumber": "+919876500010",
+                "password": "Password123",
+                "role": "ADMIN"
+            }
+            """;
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email", is("attacker.admin@example.in")))
+                .andExpect(jsonPath("$.role", is("DRIVER")));
+
+        User user = userRepository.findByEmail("attacker.admin@example.in").orElseThrow();
+        assertThat(user.getRole().getName()).isEqualTo(RoleType.DRIVER);
+        assertThat(user.getRole().getName()).isNotEqualTo(RoleType.ADMIN);
+    }
+
+    @Test
+    @DisplayName("13. Malicious public registration payload with role=OPERATOR still creates DRIVER account")
+    void testMaliciousRegistrationRoleOperatorIgnored() throws Exception {
+        String json = """
+            {
+                "firstName": "Attacker",
+                "lastName": "Operator",
+                "email": "attacker.op@example.in",
+                "phoneNumber": "+919876500011",
+                "password": "Password123",
+                "role": "OPERATOR"
+            }
+            """;
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email", is("attacker.op@example.in")))
+                .andExpect(jsonPath("$.role", is("DRIVER")));
+
+        User user = userRepository.findByEmail("attacker.op@example.in").orElseThrow();
+        assertThat(user.getRole().getName()).isEqualTo(RoleType.DRIVER);
+        assertThat(user.getRole().getName()).isNotEqualTo(RoleType.OPERATOR);
+    }
 }

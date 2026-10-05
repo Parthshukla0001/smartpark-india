@@ -16,6 +16,17 @@ export interface User {
   lastName: string;
 }
 
+export interface StaffMember {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phoneNumber?: string;
+  role: Role;
+  active: boolean;
+  createdAt: string;
+}
+
 export interface AuthResponse {
   accessToken: string;
   tokenType: string;

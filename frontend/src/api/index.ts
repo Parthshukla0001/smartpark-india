@@ -8,8 +8,10 @@ import {
   ParkingFloor,
   ParkingLot,
   ParkingSlot,
+  Role,
   SlotStatus,
   SlotType,
+  StaffMember,
   Vehicle,
   VehicleType,
   ActuatorHealthResponse,
@@ -26,8 +28,23 @@ export const authApi = {
     email: string;
     password: string;
     phoneNumber?: string;
-    role?: string;
   }) => apiClient.post<any>('/api/auth/register', data),
+};
+
+export const staffApi = {
+  getAllStaff: () => apiClient.get<StaffMember[]>('/api/admin/staff'),
+
+  createStaff: (data: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    phoneNumber?: string;
+    role?: Role;
+  }) => apiClient.post<StaffMember>('/api/admin/staff', data),
+
+  updateStaffStatus: (id: number, active: boolean) =>
+    apiClient.patch<StaffMember>(`/api/admin/staff/${id}/status?active=${active}`),
 };
 
 export const parkingApi = {

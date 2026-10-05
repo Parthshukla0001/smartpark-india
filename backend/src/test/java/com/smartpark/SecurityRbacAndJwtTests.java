@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -224,5 +225,104 @@ class SecurityRbacAndJwtTests {
 
         // Counter is reset
         assertThat(loginAttemptService.getRemainingAttempts(targetEmail)).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("9. ADMIN can create new OPERATOR staff member via /api/admin/staff")
+    void testAdminCanCreateOperatorStaff() throws Exception {
+        String json = """
+            {
+                "firstName": "Sunil",
+                "lastName": "Operator",
+                "email": "sunil.op@example.in",
+                "phoneNumber": "+919876599050",
+                "password": "Password123",
+                "role": "OPERATOR"
+            }
+            """;
+
+        mockMvc.perform(post("/api/admin/staff")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email", is("sunil.op@example.in")))
+                .andExpect(jsonPath("$.role", is("OPERATOR")))
+                .andExpect(jsonPath("$.active", is(true)));
+
+        User created = userRepository.findByEmail("sunil.op@example.in").orElseThrow();
+        assertThat(created.getRole().getName()).isEqualTo(RoleType.OPERATOR);
+    }
+
+    @Test
+    @DisplayName("10. ADMIN can list all staff members via /api/admin/staff")
+    void testAdminCanListStaff() throws Exception {
+        mockMvc.perform(get("/api/admin/staff")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    @DisplayName("11. ADMIN can toggle staff active status via /api/admin/staff/{id}/status")
+    void testAdminCanToggleStaffStatus() throws Exception {
+        mockMvc.perform(patch("/api/admin/staff/" + operatorUser.getId() + "/status?active=false")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is(operatorUser.getId().intValue())))
+                .andExpect(jsonPath("$.active", is(false)));
+
+        User updated = userRepository.findById(operatorUser.getId()).orElseThrow();
+        assertThat(updated.isActive()).isFalse();
+
+        // Re-activate
+        mockMvc.perform(patch("/api/admin/staff/" + operatorUser.getId() + "/status?active=true")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active", is(true)));
+    }
+
+    @Test
+    @DisplayName("12. DRIVER is forbidden (403) from /api/admin/staff")
+    void testDriverForbiddenFromStaffManagement() throws Exception {
+        mockMvc.perform(get("/api/admin/staff")
+                        .header("Authorization", "Bearer " + driverToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status", is(403)));
+
+        String createJson = """
+            {
+                "firstName": "Hacker",
+                "lastName": "Staff",
+                "email": "hacker.staff@example.in",
+                "phoneNumber": "+919876599051",
+                "password": "Password123",
+                "role": "OPERATOR"
+            }
+            """;
+
+        mockMvc.perform(post("/api/admin/staff")
+                        .header("Authorization", "Bearer " + driverToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJson))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status", is(403)));
+    }
+
+    @Test
+    @DisplayName("13. OPERATOR is forbidden (403) from /api/admin/staff")
+    void testOperatorForbiddenFromStaffManagement() throws Exception {
+        mockMvc.perform(get("/api/admin/staff")
+                        .header("Authorization", "Bearer " + operatorToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status", is(403)));
+    }
+
+    @Test
+    @DisplayName("14. Unauthenticated access to /api/admin/staff returns 401 Unauthorized")
+    void testUnauthenticatedForbiddenFromStaffManagement() throws Exception {
+        mockMvc.perform(get("/api/admin/staff"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status", is(401)));
     }
 }

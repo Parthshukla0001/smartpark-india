@@ -16,6 +16,7 @@ import {
   Radio,
   ArrowRight,
   ShieldAlert,
+  Users,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -181,6 +182,25 @@ export const AdminDashboard: React.FC = () => {
         >
           <p style={{ fontSize: '0.875rem', color: '#94A3B8', lineHeight: '1.5' }}>
             Inspect real-time Micrometer meters for double-booking concurrency conflicts, rate-limiting rejections, and p95 latency.
+          </p>
+        </Card>
+
+        <Card
+          title="Staff & Operator Management"
+          subtitle="Provision facility operators and platform administrators"
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/admin/staff')}
+              icon={<Users size={14} />}
+            >
+              Manage Staff
+            </Button>
+          }
+        >
+          <p style={{ fontSize: '0.875rem', color: '#94A3B8', lineHeight: '1.5' }}>
+            Invite and configure operational staff, monitor credentials, and activate or suspend access permissions across the national platform.
           </p>
         </Card>
       </div>

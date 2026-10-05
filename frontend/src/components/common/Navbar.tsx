@@ -17,6 +17,7 @@ import {
   CalendarCheck,
   BarChart3,
   Sliders,
+  Users,
 } from 'lucide-react';
 import { wsManager } from '../../services/websocket';
 
@@ -215,6 +216,13 @@ export const Navbar: React.FC = () => {
                   icon={<Building2 size={16} />}
                 >
                   Facilities & Slots
+                </NavLink>
+                <NavLink
+                  to="/admin/staff"
+                  active={location.pathname.startsWith('/admin/staff')}
+                  icon={<Users size={16} />}
+                >
+                  Staff Management
                 </NavLink>
                 <NavLink
                   to="/admin/health"

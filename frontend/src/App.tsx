@@ -25,6 +25,7 @@ import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminFacilitiesPage } from './pages/admin/AdminFacilitiesPage';
 import { AdminHealthPage } from './pages/admin/AdminHealthPage';
 import { AdminMetricsPage } from './pages/admin/AdminMetricsPage';
+import { AdminStaffPage } from './pages/admin/AdminStaffPage';
 
 const RootRedirect: React.FC = () => {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -66,6 +67,7 @@ function App() {
             <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
               <Route path="/admin/dashboard" element={<AdminDashboard />} />
               <Route path="/admin/facilities" element={<AdminFacilitiesPage />} />
+              <Route path="/admin/staff" element={<AdminStaffPage />} />
               <Route path="/admin/health" element={<AdminHealthPage />} />
               <Route path="/admin/metrics" element={<AdminMetricsPage />} />
             </Route>
