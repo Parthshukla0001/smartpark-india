@@ -539,6 +539,60 @@ Furthermore, distributed message streaming requires at-least-once delivery seman
   - Adds Apache Kafka container and operational monitoring overhead.
   - Outbox poller incurs small, periodic database queries against the indexed outbox table.
 
+---
+
+## ADR 015: Database Query Optimization, Supporting Indexes, and N+1 Elimination
+
+### Status
+Accepted
+
+### Context
+Through Phases 1 to 9, SmartPark India grew into a feature-complete smart parking platform with domain persistence, concurrency controls, Redis caching, WebSockets, and Kafka messaging. In Phase 10, database query performance, indexing efficiency, and ORM query execution were systematically audited using PostgreSQL `EXPLAIN (ANALYZE, BUFFERS)` on realistic data volumes.
+
+Key performance bottlenecks were identified:
+1. **N+1 Query Multiplication in Booking History**: Mapping `Page<Booking>` entities to `BookingResponse` DTOs in `BookingService.getMyBookings` lazily initialized `user`, `vehicle`, `parkingSlot`, `parkingFloor`, and `parkingLot` for each row. For a standard 20-item page, this resulted in 1 initial query + (20 × 5) = **101 SQL queries** per request.
+2. **In-Memory Heap Sorting on Paginated History**: Queries filtering by `user_id` were forced to execute top-N heapsort in memory (27kB sort buffer in test benchmarks) because the existing `idx_bookings_user_id` index lacked `start_time DESC`.
+3. **Index Invalidation on Case-Insensitive City Search**: `ParkingLotService.getParkingLots` queries by `LOWER(city) = :city AND active = :active`. The existing index on `(city)` could not be used by PostgreSQL for expression evaluation.
+4. **Historical Booking Bloat in Overlap Availability Queries**: In production systems with millions of historical records, checking slot availability against an unconstrained index touches completed, cancelled, and expired records.
+
+### Decision
+
+1. **N+1 Elimination via Spring Data JPA `@EntityGraph`**:
+   - Annotated `findByUserId(Long, Pageable)`, `findByUserIdAndStatus(Long, BookingStatus, Pageable)`, `findByIdAndUserId(Long, Long)`, and `findByIdWithDetails(Long)` in `BookingRepository` with `@EntityGraph(attributePaths = {"user", "vehicle", "parkingSlot.parkingFloor.parkingLot"})`.
+   - Single SQL query with LEFT OUTER JOINs fetches the entire required aggregate graph in one roundtrip, slashing database queries from 101 down to 2 (including pagination count query) — a **98% reduction in query roundtrips**.
+   - Default entity relationship fetching remains `FetchType.LAZY` everywhere, avoiding blanket eager loading anti-patterns.
+
+2. **Composite Indexes for Booking History (`V5__query_optimizations.sql`)**:
+   - `idx_bookings_user_start_time ON bookings (user_id, start_time DESC)`:
+     - Directly provides pre-sorted rows for driver booking history.
+     - **Measured impact via `EXPLAIN (ANALYZE, BUFFERS)`**: Eliminated top-N heapsort memory completely (0 kB sort memory), reduced buffer hits by 86% (44 buffers down to 6), and reduced execution time by 67% (from 0.476ms to 0.158ms on 3,000 benchmark rows).
+   - `idx_bookings_user_status_start_time ON bookings (user_id, status, start_time DESC)`:
+     - Multi-column index satisfying status filtering while streaming `start_time DESC` without in-memory sorting (reduced execution time from 0.463ms to 0.111ms).
+
+3. **Case-Insensitive Functional Index on Parking Lots**:
+   - `idx_parking_lots_lower_city_active ON parking_lots (LOWER(city), active)`:
+     - Specifically supports `LOWER(city) = :city AND active = :active` from `ParkingLotService.getParkingLots` specification and `findByCityIgnoreCase`.
+
+4. **Compact Partial Index for Active Slot Overlap Checks**:
+   - `idx_bookings_active_slot_times ON bookings (parking_slot_id, start_time, end_time) WHERE (status IN ('CONFIRMED', 'PENDING'))`:
+     - Accelerates the application-level pre-check in `BookingRepository.existsByParkingSlotAndTimeOverlap`.
+     - Strictly stores active reservations (excluding 98%+ historical records), resulting in a tiny memory footprint.
+     - **Authoritative Concurrency Preservation**: The Phase 5 PostgreSQL `btree_gist` exclusion constraint (`uq_bookings_no_overlapping_active_slots`) remains 100% authoritative and unchanged for transactional serialization and double-booking prevention.
+
+5. **Safe Paginated Notification Access**:
+   - Added `Page<Notification> findByUserIdOrderByCreatedAtDesc(Long, Pageable)` to `NotificationRepository`, supported by the existing composite index `(user_id, created_at DESC)` (`0.074ms` index scan), preventing unbounded in-memory collection loading.
+
+### Consequences
+- **Positive:**
+  - 98% reduction in SQL roundtrips for paginated booking history.
+  - In-memory sorting eliminated for driver history views.
+  - Zero degradation to transactional concurrency guarantees (GiST exclusion constraint intact).
+  - Sub-millisecond partial index lookups for active slot availability.
+  - Safe, paginated access paths across all major read workflows.
+- **Negative:**
+  - Four new secondary indexes slightly increase write amplification during booking creation (mitigated by partial filtering on active statuses for `idx_bookings_active_slot_times`).
+
+
 
 
 

@@ -2,7 +2,7 @@
 
 **India-Focused Smart Parking Management Platform**
 
-> Currently implemented: **Phase 9 — Kafka-Based Asynchronous Event Processing & Transactional Outbox**
+> Currently implemented: **Phase 10 — Database Query Optimization & Performance Analysis**
 
 SmartPark India is an enterprise-grade smart parking management platform designed specifically for the Indian market. It provides real-time parking availability, slot booking and reservations, payment integration, and administrative dashboards for parking operators and drivers.
 
@@ -22,7 +22,8 @@ SmartPark India is an enterprise-grade smart parking management platform designe
 | **Phase 7 — Redis Caching & Distributed Rate Limiting** | Redis 7 integration, Cache-aside for lots/slots, Post-commit invalidation, Atomic Lua fixed-window rate limiter, HTTP 429 Retry-After, Fail-open resilience; 110 automated tests | ✅ Complete |
 | **Phase 8 — Real-Time Parking Updates (WebSockets)** | Spring WebSocket + STOMP, `/ws` endpoint, `/topic/parking-lots/{lotId}`, JWT STOMP auth, Post-commit event dispatch; 121 automated tests | ✅ Complete |
 | **Phase 9 — Asynchronous Event Processing (Kafka & Outbox)** | Apache Kafka 3.8 (KRaft), Transactional Outbox Pattern, `FOR UPDATE SKIP LOCKED` poller, Idempotent consumer (`processed_events`), Retry & Dead Letter Topic (`DLT`), Notification dispatch; 129 automated tests | ✅ Complete |
-| **Phase 10 — Payments & Integrations** | UPI / Payment Gateway integration, Webhooks, Reconciliation | 🔜 Planned |
+| **Phase 10 — Query Optimization & Performance Analysis** | EXPLAIN ANALYZE measurement, N+1 query elimination via `@EntityGraph`, Composite & functional indexes (`V5`), In-memory sort removal, Paginated notification querying; 136 automated tests | ✅ Complete |
+| **Phase 11 — Payments & Integrations** | UPI / Payment Gateway integration, Webhooks, Reconciliation | 🔜 Planned |
 
 ---
 

@@ -254,7 +254,7 @@ public class BookingService {
             booking = bookingRepository.findByIdAndUserId(id, currentUser.getId())
                     .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
         } else {
-            booking = bookingRepository.findById(id)
+            booking = bookingRepository.findByIdWithDetails(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
         }
 
