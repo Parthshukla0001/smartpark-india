@@ -39,6 +39,17 @@ public class BookingController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/all")
+    @PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
+    public ResponseEntity<PageResponse<BookingResponse>> getAllBookings(
+            @RequestParam(required = false) BookingStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        PageResponse<BookingResponse> response = bookingService.getAllBookings(status, page, size);
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('DRIVER', 'ADMIN', 'OPERATOR')")
     public ResponseEntity<BookingResponse> getBookingById(@PathVariable Long id) {

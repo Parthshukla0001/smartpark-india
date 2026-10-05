@@ -266,6 +266,29 @@ public class BookingService {
         return PageResponse.from(responsePage);
     }
 
+    public PageResponse<BookingResponse> getAllBookings(BookingStatus status, int page, int size) {
+        if (page < 0) {
+            page = 0;
+        }
+        if (size <= 0) {
+            size = DEFAULT_PAGE_SIZE;
+        } else if (size > MAX_PAGE_SIZE) {
+            size = MAX_PAGE_SIZE;
+        }
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "startTime"));
+        Page<Booking> bookingPage;
+
+        if (status != null) {
+            bookingPage = bookingRepository.findByStatus(status, pageable);
+        } else {
+            bookingPage = bookingRepository.findAllBy(pageable);
+        }
+
+        Page<BookingResponse> responsePage = bookingPage.map(BookingResponse::fromEntity);
+        return PageResponse.from(responsePage);
+    }
+
     public BookingResponse getBookingById(Long id) {
         User currentUser = currentUserService.getCurrentUserEntity();
         boolean isDriver = currentUser.getRole().getName() == RoleType.DRIVER;

@@ -45,6 +45,12 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Page<Booking> findByUserIdAndStatus(Long userId, BookingStatus status, Pageable pageable);
 
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"user", "vehicle", "parkingSlot.parkingFloor.parkingLot"})
+    Page<Booking> findAllBy(Pageable pageable);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"user", "vehicle", "parkingSlot.parkingFloor.parkingLot"})
+    Page<Booking> findByStatus(BookingStatus status, Pageable pageable);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"user", "vehicle", "parkingSlot.parkingFloor.parkingLot"})
     Optional<Booking> findByIdAndUserId(Long id, Long userId);
 
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"user", "vehicle", "parkingSlot.parkingFloor.parkingLot"})

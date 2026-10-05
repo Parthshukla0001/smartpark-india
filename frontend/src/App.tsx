@@ -1,35 +1,82 @@
-import './App.css'
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
+import { ProtectedRoute } from './routes/ProtectedRoute';
+
+// Auth Pages
+import { LoginPage } from './pages/auth/LoginPage';
+import { RegisterPage } from './pages/auth/RegisterPage';
+
+// Driver Pages
+import { DriverDashboard } from './pages/driver/DriverDashboard';
+import { ParkingSearchPage } from './pages/driver/ParkingSearchPage';
+import { ParkingLotDetailPage } from './pages/driver/ParkingLotDetailPage';
+import { MyBookingsPage } from './pages/driver/MyBookingsPage';
+import { VehiclesPage } from './pages/driver/VehiclesPage';
+
+// Operator Pages
+import { OperatorDashboard } from './pages/operator/OperatorDashboard';
+import { OperatorFloorsPage } from './pages/operator/OperatorFloorsPage';
+import { OperatorBookingsPage } from './pages/operator/OperatorBookingsPage';
+
+// Admin Pages
+import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { AdminFacilitiesPage } from './pages/admin/AdminFacilitiesPage';
+import { AdminHealthPage } from './pages/admin/AdminHealthPage';
+import { AdminMetricsPage } from './pages/admin/AdminMetricsPage';
+
+const RootRedirect: React.FC = () => {
+  const { user, isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
+  if (user.role === 'ADMIN') return <Navigate to="/admin/dashboard" replace />;
+  if (user.role === 'OPERATOR') return <Navigate to="/operator/dashboard" replace />;
+  return <Navigate to="/driver/dashboard" replace />;
+};
 
 function App() {
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      backgroundColor: '#f8fafc',
-      color: '#1e293b',
-    }}>
-      <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem', color: '#0f172a' }}>
-        🅿️ SmartPark India
-      </h1>
-      <p style={{ fontSize: '1.25rem', color: '#64748b' }}>
-        Smart Parking Management Platform
-      </p>
-      <div style={{
-        marginTop: '2rem',
-        padding: '1rem 2rem',
-        backgroundColor: '#e2e8f0',
-        borderRadius: '8px',
-        fontSize: '0.9rem',
-        color: '#475569',
-      }}>
-        Phase 0 — Project Foundation ✅
-      </div>
-    </div>
-  )
+    <BrowserRouter>
+      <AuthProvider>
+        <ToastProvider>
+          <Routes>
+            {/* Public Auth Routes */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/" element={<RootRedirect />} />
+
+            {/* Driver Routes */}
+            <Route element={<ProtectedRoute allowedRoles={['DRIVER', 'ADMIN']} />}>
+              <Route path="/driver/dashboard" element={<DriverDashboard />} />
+              <Route path="/driver/search" element={<ParkingSearchPage />} />
+              <Route path="/driver/lots/:id" element={<ParkingLotDetailPage />} />
+              <Route path="/driver/bookings" element={<MyBookingsPage />} />
+              <Route path="/driver/vehicles" element={<VehiclesPage />} />
+            </Route>
+
+            {/* Operator Routes */}
+            <Route element={<ProtectedRoute allowedRoles={['OPERATOR', 'ADMIN']} />}>
+              <Route path="/operator/dashboard" element={<OperatorDashboard />} />
+              <Route path="/operator/floors" element={<OperatorFloorsPage />} />
+              <Route path="/operator/bookings" element={<OperatorBookingsPage />} />
+            </Route>
+
+            {/* Admin Routes */}
+            <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
+              <Route path="/admin/dashboard" element={<AdminDashboard />} />
+              <Route path="/admin/facilities" element={<AdminFacilitiesPage />} />
+              <Route path="/admin/health" element={<AdminHealthPage />} />
+              <Route path="/admin/metrics" element={<AdminMetricsPage />} />
+            </Route>
+
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </ToastProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  );
 }
 
-export default App
+export default App;
