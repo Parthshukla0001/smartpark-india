@@ -63,7 +63,8 @@ public class SecurityConfig {
                                 "/api/health",
                                 "/actuator/**",
                                 "/api/auth/register",
-                                "/api/auth/login"
+                                "/api/auth/login",
+                                "/ws/**"
                         ).permitAll()
                         // All other application APIs require valid authentication
                         .anyRequest().authenticated()

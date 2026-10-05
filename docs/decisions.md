@@ -423,6 +423,59 @@ Phase 7 introduces Redis to optimize read performance and enforce distributed AP
   - Extra network hop to Redis on cache reads and rate limit checks.
   - Cache memory usage must be monitored, controlled by Redis TTL policies.
 
+---
+
+## ADR 013: Real-Time Parking Updates via WebSockets & STOMP
+
+### Status
+Accepted
+
+### Context
+Phase 8 introduces real-time state synchronization for active parking facilities. Without push updates, clients (drivers observing slot availability or parking operators managing active lots) must poll REST endpoints repeatedly, causing unnecessary database/Redis load, latency, and stale UI views. We need a secure, scalable, and transactional real-time delivery mechanism.
+
+### Decision
+1. **Spring WebSocket with STOMP Protocol**:
+   - Selected STOMP over raw WebSockets because STOMP provides standardized frame semantics (`CONNECT`, `SUBSCRIBE`, `SEND`, `MESSAGE`), pub/sub message routing, and destination management out of the box without requiring custom serialization or wire protocols (e.g. Socket.IO).
+   - Configured endpoint at `/ws` with SockJS fallback.
+
+2. **Topic Structure**:
+   - Adopted a clean per-facility hierarchy: `/topic/parking-lots/{lotId}`.
+   - All slot status changes and booking lifecycle transitions for a parking lot are broadcast to this topic. Interested drivers and operators subscribe only to the specific facilities they are monitoring.
+
+3. **Authentication & Authorization**:
+   - Reused existing JWT security infrastructure via `WebSocketSecurityChannelInterceptor`:
+     - On STOMP `CONNECT`, native `Authorization: Bearer <jwt>` (or `token`) header is validated against `JwtService` and `CustomUserDetailsService`. Unauthenticated connections are rejected.
+     - On STOMP `SUBSCRIBE`, the user principal is verified, and the destination is checked against `/topic/parking-lots/{lotId}`. Subscriptions to non-existent lots or unauthorized paths are rejected with `AccessDeniedException`.
+
+4. **Event Payload Design & Sanitization**:
+   - Created dedicated `ParkingEventPayload` DTO.
+   - Carries: `eventType`, `parkingLotId`, `floorId`, `slotId`, `slotNumber`, `slotType`, `slotStatus`, `bookingId`, `bookingStatus`, `startTime`, `endTime`, `timestamp`.
+   - Strictly omits sensitive user information, passwords, hashes, JWT tokens, and internal database details.
+
+5. **Post-Commit Event Publishing**:
+   - Decoupled from controllers: business operations emit internal Spring `ParkingDomainEvent` instances via `ApplicationEventPublisher`.
+   - `ParkingEventListener` uses `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)` to deliver messages via `SimpMessagingTemplate` strictly after the PostgreSQL transaction successfully commits.
+   - If a transaction fails or rolls back, zero WebSocket events are broadcast, eliminating phantom update bugs.
+
+6. **WebSockets Are Not the Source of Truth**:
+   - WebSockets are ephemeral, best-effort notifications.
+   - PostgreSQL remains the authoritative transactional source of truth, backed by Redis cache-aside reads. If a client disconnects or misses an event, it can seamlessly re-sync by fetching the current state from the standard REST API (`/api/parking-lots/{id}/floors/{floorId}/slots`).
+
+7. **Why Kafka is Deferred**:
+   - Kafka is an event-streaming backbone for cross-service asynchronous persistence, audit trails, and multi-consumer pipelines.
+   - For in-process fan-out of lightweight UI notifications to connected STOMP sessions in a modular monolith, Spring's in-memory STOMP broker is significantly simpler, requires zero extra infrastructure, and provides sub-millisecond delivery with lower overhead.
+
+### Consequences
+- **Positive:**
+  - Real-time slot availability and booking lifecycle changes pushed instantly to clients.
+  - Bulletproof transaction boundaries: no notifications on failed transactions.
+  - Zero sensitive data exposure.
+  - Full backward compatibility with REST and Redis layers.
+- **Negative:**
+  - Open WebSocket connections consume server file descriptors and memory.
+  - Clustered multi-node WebSocket fan-out will require a STOMP broker relay (e.g. RabbitMQ or Redis pub/sub) in future horizontal scale phases.
+
+
 
 
 

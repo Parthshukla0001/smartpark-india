@@ -35,8 +35,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        // Exclude system health checks, actuator endpoints, and OpenAPI/docs
-        return path.equals("/api/health") || path.startsWith("/actuator");
+        // Exclude system health checks, actuator endpoints, and WebSocket handshake
+        return path.equals("/api/health") || path.startsWith("/actuator") || path.startsWith("/ws");
     }
 
     @Override

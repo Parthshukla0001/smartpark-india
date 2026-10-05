@@ -45,16 +45,17 @@ public class BookingService {
     private final SecurityAuditLogger auditLogger;
     private final Clock clock;
     private final int cancellationCutoffMinutes;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @Autowired
     public BookingService(BookingRepository bookingRepository,
                           VehicleRepository vehicleRepository,
-
                           ParkingSlotRepository parkingSlotRepository,
                           CurrentUserService currentUserService,
                           SecurityAuditLogger auditLogger,
                           Clock clock,
-                          @Value("${smartpark.booking.cancellation-cutoff-minutes:15}") int cancellationCutoffMinutes) {
+                          @Value("${smartpark.booking.cancellation-cutoff-minutes:15}") int cancellationCutoffMinutes,
+                          org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.bookingRepository = bookingRepository;
         this.vehicleRepository = vehicleRepository;
         this.parkingSlotRepository = parkingSlotRepository;
@@ -62,6 +63,7 @@ public class BookingService {
         this.auditLogger = auditLogger;
         this.clock = clock;
         this.cancellationCutoffMinutes = cancellationCutoffMinutes;
+        this.eventPublisher = eventPublisher;
     }
 
     public BookingService(BookingRepository bookingRepository,
@@ -70,7 +72,13 @@ public class BookingService {
                           CurrentUserService currentUserService,
                           SecurityAuditLogger auditLogger,
                           Clock clock) {
-        this(bookingRepository, vehicleRepository, parkingSlotRepository, currentUserService, auditLogger, clock, 15);
+        this(bookingRepository, vehicleRepository, parkingSlotRepository, currentUserService, auditLogger, clock, 15, null);
+    }
+
+    private void publishParkingEvent(Long lotId, com.smartpark.websocket.dto.ParkingEventPayload payload) {
+        if (eventPublisher != null && lotId != null) {
+            eventPublisher.publishEvent(new com.smartpark.websocket.event.ParkingDomainEvent(lotId, payload));
+        }
     }
 
 
@@ -165,6 +173,21 @@ public class BookingService {
                 "Created booking id=" + savedBooking.getId() + " for slot id=" + slot.getId() +
                         " vehicle id=" + vehicle.getId());
 
+        publishParkingEvent(lot.getId(),
+                com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
+                        com.smartpark.websocket.ParkingEventType.BOOKING_CREATED,
+                        lot.getId(),
+                        floor.getId(),
+                        slot.getId(),
+                        slot.getSlotNumber(),
+                        slot.getSlotType(),
+                        slot.getStatus(),
+                        savedBooking.getId(),
+                        savedBooking.getStatus(),
+                        savedBooking.getStartTime(),
+                        savedBooking.getEndTime()
+                ));
+
         return BookingResponse.fromEntity(savedBooking);
     }
 
@@ -257,6 +280,26 @@ public class BookingService {
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CANCELLED, currentUser.getEmail(),
                 "Cancelled booking id=" + id);
 
+        ParkingSlot slot = updatedBooking.getParkingSlot();
+        ParkingFloor floor = slot != null ? slot.getParkingFloor() : null;
+        ParkingLot lot = floor != null ? floor.getParkingLot() : null;
+        if (lot != null) {
+            publishParkingEvent(lot.getId(),
+                    com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
+                            com.smartpark.websocket.ParkingEventType.BOOKING_CANCELLED,
+                            lot.getId(),
+                            floor.getId(),
+                            slot.getId(),
+                            slot.getSlotNumber(),
+                            slot.getSlotType(),
+                            slot.getStatus(),
+                            updatedBooking.getId(),
+                            updatedBooking.getStatus(),
+                            updatedBooking.getStartTime(),
+                            updatedBooking.getEndTime()
+                    ));
+        }
+
         return BookingResponse.fromEntity(updatedBooking);
     }
 
@@ -284,6 +327,26 @@ public class BookingService {
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_CONFIRMED, currentUser.getEmail(),
                 "Confirmed booking id=" + id);
 
+        ParkingSlot slot = updatedBooking.getParkingSlot();
+        ParkingFloor floor = slot != null ? slot.getParkingFloor() : null;
+        ParkingLot lot = floor != null ? floor.getParkingLot() : null;
+        if (lot != null) {
+            publishParkingEvent(lot.getId(),
+                    com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
+                            com.smartpark.websocket.ParkingEventType.BOOKING_CONFIRMED,
+                            lot.getId(),
+                            floor.getId(),
+                            slot.getId(),
+                            slot.getSlotNumber(),
+                            slot.getSlotType(),
+                            slot.getStatus(),
+                            updatedBooking.getId(),
+                            updatedBooking.getStatus(),
+                            updatedBooking.getStartTime(),
+                            updatedBooking.getEndTime()
+                    ));
+        }
+
         return BookingResponse.fromEntity(updatedBooking);
     }
 
@@ -303,6 +366,26 @@ public class BookingService {
 
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_COMPLETED, currentUser.getEmail(),
                 "Completed booking id=" + id);
+
+        ParkingSlot slot = updatedBooking.getParkingSlot();
+        ParkingFloor floor = slot != null ? slot.getParkingFloor() : null;
+        ParkingLot lot = floor != null ? floor.getParkingLot() : null;
+        if (lot != null) {
+            publishParkingEvent(lot.getId(),
+                    com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
+                            com.smartpark.websocket.ParkingEventType.BOOKING_COMPLETED,
+                            lot.getId(),
+                            floor.getId(),
+                            slot.getId(),
+                            slot.getSlotNumber(),
+                            slot.getSlotType(),
+                            slot.getStatus(),
+                            updatedBooking.getId(),
+                            updatedBooking.getStatus(),
+                            updatedBooking.getStartTime(),
+                            updatedBooking.getEndTime()
+                    ));
+        }
 
         return BookingResponse.fromEntity(updatedBooking);
     }
@@ -332,6 +415,26 @@ public class BookingService {
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_EXPIRED, currentUser.getEmail(),
                 "Expired booking id=" + id);
 
+        ParkingSlot slot = updatedBooking.getParkingSlot();
+        ParkingFloor floor = slot != null ? slot.getParkingFloor() : null;
+        ParkingLot lot = floor != null ? floor.getParkingLot() : null;
+        if (lot != null) {
+            publishParkingEvent(lot.getId(),
+                    com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
+                            com.smartpark.websocket.ParkingEventType.BOOKING_EXPIRED,
+                            lot.getId(),
+                            floor.getId(),
+                            slot.getId(),
+                            slot.getSlotNumber(),
+                            slot.getSlotType(),
+                            slot.getStatus(),
+                            updatedBooking.getId(),
+                            updatedBooking.getStatus(),
+                            updatedBooking.getStartTime(),
+                            updatedBooking.getEndTime()
+                    ));
+        }
+
         return BookingResponse.fromEntity(updatedBooking);
     }
 
@@ -349,6 +452,26 @@ public class BookingService {
             bookingRepository.save(booking);
             auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.BOOKING_EXPIRED, "SYSTEM_SCHEDULER",
                     "Auto-expired booking id=" + booking.getId());
+
+            ParkingSlot slot = booking.getParkingSlot();
+            ParkingFloor floor = slot != null ? slot.getParkingFloor() : null;
+            ParkingLot lot = floor != null ? floor.getParkingLot() : null;
+            if (lot != null) {
+                publishParkingEvent(lot.getId(),
+                        com.smartpark.websocket.dto.ParkingEventPayload.forBookingEvent(
+                                com.smartpark.websocket.ParkingEventType.BOOKING_EXPIRED,
+                                lot.getId(),
+                                floor.getId(),
+                                slot.getId(),
+                                slot.getSlotNumber(),
+                                slot.getSlotType(),
+                                slot.getStatus(),
+                                booking.getId(),
+                                booking.getStatus(),
+                                booking.getStartTime(),
+                                booking.getEndTime()
+                        ));
+            }
         }
 
         bookingRepository.flush();

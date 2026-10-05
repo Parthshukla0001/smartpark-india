@@ -2,7 +2,7 @@
 
 **India-Focused Smart Parking Management Platform**
 
-> Currently implemented: **Phase 7 — Redis Caching & Distributed API Rate Limiting**
+> Currently implemented: **Phase 8 — Real-Time Parking Updates via WebSockets & STOMP**
 
 SmartPark India is an enterprise-grade smart parking management platform designed specifically for the Indian market. It provides real-time parking availability, slot booking and reservations, payment integration, and administrative dashboards for parking operators and drivers.
 
@@ -20,7 +20,9 @@ SmartPark India is an enterprise-grade smart parking management platform designe
 | **Phase 5 — Concurrency & Double-Booking Prevention** | PostgreSQL `btree_gist` exclusion constraints, Pessimistic slot row locking (`PESSIMISTIC_WRITE`), Deadlock elimination, Multi-threaded race condition tests; 78 automated tests | ✅ Complete |
 | **Phase 6 — Booking Lifecycle Management** | State machine (PENDING, CONFIRMED, CANCELLED, COMPLETED, EXPIRED), Driver cutoff deadline, Scheduled idempotent expiry, Pessimistic row locking; 99 automated tests | ✅ Complete |
 | **Phase 7 — Redis Caching & Distributed Rate Limiting** | Redis 7 integration, Cache-aside for lots/slots, Post-commit invalidation, Atomic Lua fixed-window rate limiter, HTTP 429 Retry-After, Fail-open resilience; 110 automated tests | ✅ Complete |
-| **Phase 8 — Event Streaming & Observability** | Apache Kafka events, Prometheus / Grafana metrics, Distributed tracing | 🔜 Planned |
+| **Phase 8 — Real-Time Parking Updates (WebSockets)** | Spring WebSocket + STOMP, `/ws` endpoint, `/topic/parking-lots/{lotId}`, JWT STOMP auth, Post-commit event dispatch; 121 automated tests | ✅ Complete |
+| **Phase 9 — Payments & Real-time Integrations** | UPI / Payment Gateway integration, Webhooks, Reconciliation | 🔜 Planned |
+| **Phase 10 — Event Streaming & Observability** | Apache Kafka events, Prometheus / Grafana metrics, Distributed tracing | 🔜 Planned |
 
 
 
@@ -175,12 +177,11 @@ The frontend is available at **http://localhost:5173**.
 
 ---
 
-## ⚠️ Current Phase 7 Boundaries
+## ⚠️ Current Phase 8 Boundaries
  
 The following areas are intentionally reserved for upcoming phases:
 - Payment gateway integration (UPI, cards, net banking)
-- Kafka event streaming & asynchronous processing
-- WebSocket availability broadcasting
+- Kafka event streaming & distributed observability
 - Production Docker orchestration and CI/CD pipelines
 
 

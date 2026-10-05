@@ -29,19 +29,22 @@ public class ParkingSlotService {
     private final CurrentUserService currentUserService;
     private final SecurityAuditLogger auditLogger;
     private final ParkingCacheService parkingCacheService;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     public ParkingSlotService(ParkingSlotRepository parkingSlotRepository,
                               ParkingFloorService parkingFloorService,
                               ParkingLotService parkingLotService,
                               CurrentUserService currentUserService,
                               SecurityAuditLogger auditLogger,
-                              ParkingCacheService parkingCacheService) {
+                              ParkingCacheService parkingCacheService,
+                              org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.parkingSlotRepository = parkingSlotRepository;
         this.parkingFloorService = parkingFloorService;
         this.parkingLotService = parkingLotService;
         this.currentUserService = currentUserService;
         this.auditLogger = auditLogger;
         this.parkingCacheService = parkingCacheService;
+        this.eventPublisher = eventPublisher;
     }
 
 
@@ -135,6 +138,14 @@ public class ParkingSlotService {
 
         parkingCacheService.evictSlot(lotId, floorId, slotId);
 
+        eventPublisher.publishEvent(new com.smartpark.websocket.event.ParkingDomainEvent(lotId,
+                com.smartpark.websocket.dto.ParkingEventPayload.forSlotStatus(
+                        lotId, floorId, slotId,
+                        updatedSlot.getSlotNumber(),
+                        updatedSlot.getSlotType(),
+                        updatedSlot.getStatus()
+                )));
+
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_SLOT_STATUS_CHANGED, userEmail,
                 "Updated slot status id=" + updatedSlot.getId() + " to " + updatedSlot.getStatus());
@@ -152,6 +163,14 @@ public class ParkingSlotService {
         parkingSlotRepository.save(slot);
 
         parkingCacheService.evictSlot(lotId, floorId, slotId);
+
+        eventPublisher.publishEvent(new com.smartpark.websocket.event.ParkingDomainEvent(lotId,
+                com.smartpark.websocket.dto.ParkingEventPayload.forSlotStatus(
+                        lotId, floorId, slotId,
+                        slot.getSlotNumber(),
+                        slot.getSlotType(),
+                        slot.getStatus()
+                )));
 
         String userEmail = currentUserService.getCurrentPrincipal().map(p -> p.getUsername()).orElse("SYSTEM");
         auditLogger.logEvent(SecurityAuditLogger.SecurityEvent.PARKING_SLOT_DEACTIVATED, userEmail,
