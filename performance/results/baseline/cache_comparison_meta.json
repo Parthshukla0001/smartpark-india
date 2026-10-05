@@ -1,0 +1,20 @@
+﻿{
+    "pre_metrics":  {
+                        "jvm_memory_used_mb":  358.78,
+                        "hikaricp_active":  0.0,
+                        "rate_limit_rejected":  0.0,
+                        "bookings_created":  1.0,
+                        "bookings_conflicts":  49.0,
+                        "hikaricp_idle":  10.0
+                    },
+    "timestamp":  "2026-10-05T17:58:10.5907970+05:30",
+    "post_metrics":  {
+                         "jvm_memory_used_mb":  327.25,
+                         "hikaricp_active":  0.0,
+                         "rate_limit_rejected":  0.0,
+                         "bookings_created":  1.0,
+                         "bookings_conflicts":  49.0,
+                         "hikaricp_idle":  10.0
+                     },
+    "test":  "cache-comparison.js"
+}

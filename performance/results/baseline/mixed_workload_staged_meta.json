@@ -1,0 +1,20 @@
+﻿{
+    "pre_metrics":  {
+                        "jvm_memory_used_mb":  679.9,
+                        "hikaricp_active":  1.0,
+                        "rate_limit_rejected":  0.0,
+                        "bookings_created":  9978.0,
+                        "bookings_conflicts":  490.0,
+                        "hikaricp_idle":  9.0
+                    },
+    "timestamp":  "2026-10-05T18:03:13.0350033+05:30",
+    "post_metrics":  {
+                         "jvm_memory_used_mb":  467.76,
+                         "hikaricp_active":  0.0,
+                         "rate_limit_rejected":  0.0,
+                         "bookings_created":  16118.0,
+                         "bookings_conflicts":  490.0,
+                         "hikaricp_idle":  10.0
+                     },
+    "test":  "mixed-workload.js"
+}

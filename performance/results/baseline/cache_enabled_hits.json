@@ -1,0 +1,146 @@
+{
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "status is 200": {
+                    "name": "status is 200",
+                    "path": "::status is 200",
+                    "id": "6210a8cd14cd70477eba5c5e4cb3fb5f",
+                    "passes": 2000,
+                    "fails": 0
+                }
+            }
+    },
+    "metrics": {
+        "http_req_blocked": {
+            "p(90)": 0.014126799999999998,
+            "p(95)": 0.021127899999999977,
+            "avg": 0.029607872690963533,
+            "min": 0.003978,
+            "med": 0.008958,
+            "max": 4.715628
+        },
+        "data_received": {
+            "count": 1658850,
+            "rate": 970730.668280573
+        },
+        "checks": {
+            "passes": 2000,
+            "fails": 0,
+            "value": 1
+        },
+        "target_req_count": {
+            "count": 2000,
+            "rate": 1170.3658176213316
+        },
+        "http_reqs": {
+            "count": 2003,
+            "rate": 1172.1213663477636
+        },
+        "http_req_connecting": {
+            "p(95)": 0,
+            "avg": 0.009851707938092862,
+            "min": 0,
+            "med": 0,
+            "max": 1.776772,
+            "p(90)": 0
+        },
+        "target_req_duration": {
+            "avg": 15.063,
+            "min": 6,
+            "med": 14,
+            "max": 44,
+            "p(90)": 21,
+            "p(95)": 24
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(95)": 23.2714527,
+            "avg": 14.823167065901142,
+            "min": 5.966888,
+            "med": 13.929098,
+            "max": 144.882451,
+            "p(90)": 20.2555648
+        },
+        "vus_max": {
+            "value": 20,
+            "min": 20,
+            "max": 20
+        },
+        "http_req_receiving": {
+            "avg": 0.512251207688468,
+            "min": 0.050452,
+            "med": 0.208373,
+            "max": 15.862309,
+            "p(90)": 1.1541865999999998,
+            "p(95)": 1.8961853999999925
+        },
+        "http_req_tls_handshaking": {
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0,
+            "p(90)": 0
+        },
+        "iteration_duration": {
+            "p(95)": 23.8090941,
+            "avg": 15.2499049195,
+            "min": 6.556462,
+            "med": 14.4072005,
+            "max": 43.703046,
+            "p(90)": 20.843298100000005
+        },
+        "data_sent": {
+            "count": 674805,
+            "rate": 394884.35277998133
+        },
+        "iterations": {
+            "count": 2000,
+            "rate": 1170.3658176213316
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 2003,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        },
+        "http_req_duration": {
+            "avg": 14.823167065901142,
+            "min": 5.966888,
+            "med": 13.929098,
+            "max": 144.882451,
+            "p(90)": 20.2555648,
+            "p(95)": 23.2714527
+        },
+        "http_req_waiting": {
+            "avg": 14.243508574638033,
+            "min": 5.626948,
+            "med": 13.223759,
+            "max": 144.286997,
+            "p(90)": 19.6081974,
+            "p(95)": 22.403131699999996
+        },
+        "vus": {
+            "min": 20,
+            "max": 20,
+            "value": 20
+        },
+        "http_req_sending": {
+            "med": 0.028808,
+            "max": 5.511445,
+            "p(90)": 0.09280959999999999,
+            "p(95)": 0.1353677999999996,
+            "avg": 0.06740728357463803,
+            "min": 0.011072
+        }
+    },
+    "setup_data": {
+        "lotId": 1903,
+        "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiRFJJVkVSIiwiZW1haWwiOiJkcml2ZXIxQHNtYXJ0cGFyay5pbiIsInN1YiI6IjUyODMiLCJpYXQiOjE3OTEyMDM3MzUsImV4cCI6MTc5MTI5MDEzNX0.4OErj5E5s2ofwOUZpD9089ZLR_58iBx-YN2JLAvTKgg"
+    }
+}
