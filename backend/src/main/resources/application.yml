@@ -27,6 +27,19 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 2000ms
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:smartpark-notification-group}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
 
 management:
   endpoints:
@@ -63,5 +76,14 @@ smartpark:
     authenticated-limit: ${RATE_LIMIT_AUTH_LIMIT:500}
     unauthenticated-limit: ${RATE_LIMIT_UNAUTH_LIMIT:200}
     fail-open: ${RATE_LIMIT_FAIL_OPEN:true}
+  kafka:
+    topics:
+      booking-events: ${KAFKA_TOPIC_BOOKINGS:smartpark.booking.events}
+      booking-events-dlt: ${KAFKA_TOPIC_BOOKINGS_DLT:smartpark.booking.events.DLT}
+    consumer-group: ${KAFKA_CONSUMER_GROUP:smartpark-notification-group}
+    outbox:
+      enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
+      poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:1000}
+      batch-size: ${OUTBOX_BATCH_SIZE:50}
 
 

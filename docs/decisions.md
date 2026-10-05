@@ -475,6 +475,71 @@ Phase 8 introduces real-time state synchronization for active parking facilities
   - Open WebSocket connections consume server file descriptors and memory.
   - Clustered multi-node WebSocket fan-out will require a STOMP broker relay (e.g. RabbitMQ or Redis pub/sub) in future horizontal scale phases.
 
+---
+
+## ADR 014: Asynchronous Event Processing with Apache Kafka and Transactional Outbox Pattern
+
+### Status
+Accepted
+
+### Context
+Phase 9 introduces asynchronous event-driven architecture to SmartPark India. As business transactions occur (booking creations, confirmations, cancellations, completions, expiries), asynchronous downstream tasks such as customer notifications, activity auditing, and analytics must be decoupled from the core HTTP request-response lifecycle.
+
+Directly publishing messages to Kafka inside an ongoing PostgreSQL transaction introduces the dual-write problem:
+1. If the database transaction commits but the network call to Kafka fails, the event is permanently lost.
+2. If Kafka publish succeeds but the database transaction subsequently fails or rolls back, a phantom event is broadcast to downstream consumers.
+3. Network latency or outages with the Kafka broker would degrade or fail core user booking transactions.
+
+Furthermore, distributed message streaming requires at-least-once delivery semantics, which exposes consumers to potential duplicate deliveries, and unparseable malformed messages ("poison pills") can stall consumer partitions indefinitely.
+
+### Decision
+
+1. **Apache Kafka in KRaft Mode**:
+   - Deployed `apache/kafka:3.8.0` in KRaft mode via Docker Compose (eliminating ZooKeeper dependency).
+   - Configured Spring Kafka producer with `acks: all` and retry mechanisms.
+
+2. **Transactional Outbox Pattern**:
+   - Added an `outbox_events` table in PostgreSQL via Flyway migration `V4__outbox_and_notifications.sql`.
+   - Domain operations insert both the aggregate mutation and the corresponding `OutboxEvent` row within the exact same database transaction (`Propagation.REQUIRED`).
+   - If the business transaction fails, the outbox record is rolled back atomically; zero phantom events can ever be published.
+
+3. **High-Throughput Concurrent Polling with `FOR UPDATE SKIP LOCKED`**:
+   - Implemented an `OutboxPublisher` scheduler polling pending events (`published_at IS NULL`).
+   - Leveraged PostgreSQL's native `FOR UPDATE SKIP LOCKED` row locking. Multiple worker nodes or background threads can poll the outbox concurrently without blocking each other, deadlocks, or distributed locking.
+   - Events are only marked `published_at = NOW()` after synchronous confirmation of the Kafka broker ACK (`future.get(5, TimeUnit.SECONDS)`).
+   - In case of broker unavailability or publish error, `attempts` is incremented and `last_error` is recorded, keeping the event pending for subsequent retry.
+
+4. **Event Payload Schema & Data Sanitization**:
+   - Introduced dedicated `BookingKafkaEvent` transfer schema with a globally unique `eventId` (UUID).
+   - Carries clean domain context: `bookingId`, `userId`, `parkingLotId`, `floorId`, `slotId`, `slotNumber`, `startTime`, `endTime`, `timestamp`, `version`.
+   - Strictly sanitizes all sensitive PII, passwords, authentication credentials, and database internals.
+
+5. **Consumer Idempotency**:
+   - Added `processed_events` table tracking `event_id` (UUID primary key) and `processed_at`.
+   - Downstream consumers (`NotificationConsumer`) perform an idempotency check (`processedEventRepository.existsById(event.getEventId())`) before processing.
+   - Upon consumption, the `ProcessedEvent` record and resultant business entity (e.g. `Notification`) are saved atomically within the consumer's local database transaction.
+   - Any duplicate deliveries from Kafka are safely acknowledged and discarded without redundant side effects.
+
+6. **Error Handling & Dead Letter Topic (DLT)**:
+   - Configured `DefaultErrorHandler` with `FixedBackOff(1000L, 2L)` (2 delivery retries with 1-second delay).
+   - Unrecoverable failures and malformed poison pills are routed to `smartpark.booking.events.DLT` via `DeadLetterPublishingRecoverer`, preventing head-of-line blocking on the primary topic.
+
+7. **Architectural Coexistence**:
+   - WebSockets (Phase 8): real-time ephemeral push updates directly to connected UI clients.
+   - Apache Kafka (Phase 9): durable, fault-tolerant asynchronous event streaming across backend services and consumers.
+   - PostgreSQL: remains the authoritative single source of truth for all business state.
+
+### Consequences
+- **Positive:**
+  - Guaranteed event delivery with zero dual-write inconsistencies.
+  - End-to-end consumer idempotency prevents duplicate notifications.
+  - Decoupled, non-blocking asynchronous processing improves API response latency.
+  - Poison pills are isolated in the DLT topic with automated recovery.
+- **Negative:**
+  - Adds Apache Kafka container and operational monitoring overhead.
+  - Outbox poller incurs small, periodic database queries against the indexed outbox table.
+
+
 
 
 

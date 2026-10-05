@@ -6,6 +6,8 @@ import com.smartpark.dto.common.PageResponse;
 import com.smartpark.entity.*;
 import com.smartpark.exception.BookingConflictException;
 import com.smartpark.exception.ResourceNotFoundException;
+import com.smartpark.kafka.event.BookingKafkaEvent;
+import com.smartpark.kafka.outbox.OutboxService;
 import com.smartpark.repository.BookingRepository;
 import com.smartpark.repository.ParkingSlotRepository;
 import com.smartpark.repository.VehicleRepository;
@@ -46,6 +48,7 @@ public class BookingService {
     private final Clock clock;
     private final int cancellationCutoffMinutes;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final OutboxService outboxService;
 
     @Autowired
     public BookingService(BookingRepository bookingRepository,
@@ -55,7 +58,8 @@ public class BookingService {
                           SecurityAuditLogger auditLogger,
                           Clock clock,
                           @Value("${smartpark.booking.cancellation-cutoff-minutes:15}") int cancellationCutoffMinutes,
-                          org.springframework.context.ApplicationEventPublisher eventPublisher) {
+                          org.springframework.context.ApplicationEventPublisher eventPublisher,
+                          @Autowired(required = false) OutboxService outboxService) {
         this.bookingRepository = bookingRepository;
         this.vehicleRepository = vehicleRepository;
         this.parkingSlotRepository = parkingSlotRepository;
@@ -64,6 +68,7 @@ public class BookingService {
         this.clock = clock;
         this.cancellationCutoffMinutes = cancellationCutoffMinutes;
         this.eventPublisher = eventPublisher;
+        this.outboxService = outboxService;
     }
 
     public BookingService(BookingRepository bookingRepository,
@@ -72,13 +77,35 @@ public class BookingService {
                           CurrentUserService currentUserService,
                           SecurityAuditLogger auditLogger,
                           Clock clock) {
-        this(bookingRepository, vehicleRepository, parkingSlotRepository, currentUserService, auditLogger, clock, 15, null);
+        this(bookingRepository, vehicleRepository, parkingSlotRepository, currentUserService, auditLogger, clock, 15, null, null);
     }
 
     private void publishParkingEvent(Long lotId, com.smartpark.websocket.dto.ParkingEventPayload payload) {
         if (eventPublisher != null && lotId != null) {
             eventPublisher.publishEvent(new com.smartpark.websocket.event.ParkingDomainEvent(lotId, payload));
         }
+    }
+
+    private void saveOutboxEvent(String eventType, Booking booking) {
+        if (outboxService == null || booking == null) {
+            return;
+        }
+        ParkingSlot slot = booking.getParkingSlot();
+        ParkingFloor floor = slot != null ? slot.getParkingFloor() : null;
+        ParkingLot lot = floor != null ? floor.getParkingLot() : null;
+
+        BookingKafkaEvent event = BookingKafkaEvent.of(
+                eventType,
+                booking.getId(),
+                booking.getUser() != null ? booking.getUser().getId() : null,
+                lot != null ? lot.getId() : null,
+                floor != null ? floor.getId() : null,
+                slot != null ? slot.getId() : null,
+                slot != null ? slot.getSlotNumber() : null,
+                booking.getStartTime(),
+                booking.getEndTime()
+        );
+        outboxService.saveEvent("BOOKING", booking.getId(), eventType, event);
     }
 
 
@@ -187,6 +214,8 @@ public class BookingService {
                         savedBooking.getStartTime(),
                         savedBooking.getEndTime()
                 ));
+
+        saveOutboxEvent("BOOKING_CREATED", savedBooking);
 
         return BookingResponse.fromEntity(savedBooking);
     }
@@ -300,6 +329,8 @@ public class BookingService {
                     ));
         }
 
+        saveOutboxEvent("BOOKING_CANCELLED", updatedBooking);
+
         return BookingResponse.fromEntity(updatedBooking);
     }
 
@@ -347,6 +378,8 @@ public class BookingService {
                     ));
         }
 
+        saveOutboxEvent("BOOKING_CONFIRMED", updatedBooking);
+
         return BookingResponse.fromEntity(updatedBooking);
     }
 
@@ -386,6 +419,8 @@ public class BookingService {
                             updatedBooking.getEndTime()
                     ));
         }
+
+        saveOutboxEvent("BOOKING_COMPLETED", updatedBooking);
 
         return BookingResponse.fromEntity(updatedBooking);
     }
@@ -435,6 +470,8 @@ public class BookingService {
                     ));
         }
 
+        saveOutboxEvent("BOOKING_EXPIRED", updatedBooking);
+
         return BookingResponse.fromEntity(updatedBooking);
     }
 
@@ -472,6 +509,8 @@ public class BookingService {
                                 booking.getEndTime()
                         ));
             }
+
+            saveOutboxEvent("BOOKING_EXPIRED", booking);
         }
 
         bookingRepository.flush();

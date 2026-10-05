@@ -2,7 +2,7 @@
 
 **India-Focused Smart Parking Management Platform**
 
-> Currently implemented: **Phase 8 — Real-Time Parking Updates via WebSockets & STOMP**
+> Currently implemented: **Phase 9 — Kafka-Based Asynchronous Event Processing & Transactional Outbox**
 
 SmartPark India is an enterprise-grade smart parking management platform designed specifically for the Indian market. It provides real-time parking availability, slot booking and reservations, payment integration, and administrative dashboards for parking operators and drivers.
 
@@ -21,10 +21,8 @@ SmartPark India is an enterprise-grade smart parking management platform designe
 | **Phase 6 — Booking Lifecycle Management** | State machine (PENDING, CONFIRMED, CANCELLED, COMPLETED, EXPIRED), Driver cutoff deadline, Scheduled idempotent expiry, Pessimistic row locking; 99 automated tests | ✅ Complete |
 | **Phase 7 — Redis Caching & Distributed Rate Limiting** | Redis 7 integration, Cache-aside for lots/slots, Post-commit invalidation, Atomic Lua fixed-window rate limiter, HTTP 429 Retry-After, Fail-open resilience; 110 automated tests | ✅ Complete |
 | **Phase 8 — Real-Time Parking Updates (WebSockets)** | Spring WebSocket + STOMP, `/ws` endpoint, `/topic/parking-lots/{lotId}`, JWT STOMP auth, Post-commit event dispatch; 121 automated tests | ✅ Complete |
-| **Phase 9 — Payments & Real-time Integrations** | UPI / Payment Gateway integration, Webhooks, Reconciliation | 🔜 Planned |
-| **Phase 10 — Event Streaming & Observability** | Apache Kafka events, Prometheus / Grafana metrics, Distributed tracing | 🔜 Planned |
-
-
+| **Phase 9 — Asynchronous Event Processing (Kafka & Outbox)** | Apache Kafka 3.8 (KRaft), Transactional Outbox Pattern, `FOR UPDATE SKIP LOCKED` poller, Idempotent consumer (`processed_events`), Retry & Dead Letter Topic (`DLT`), Notification dispatch; 129 automated tests | ✅ Complete |
+| **Phase 10 — Payments & Integrations** | UPI / Payment Gateway integration, Webhooks, Reconciliation | 🔜 Planned |
 
 ---
 
@@ -35,6 +33,9 @@ SmartPark India is an enterprise-grade smart parking management platform designe
 | **Language** | Java | 21 (LTS standard) | Core backend language |
 | **Backend Framework** | Spring Boot | 4.1.1 | Application runtime & dependency injection |
 | **Database** | PostgreSQL | 16 (Alpine) | Primary relational ACID database |
+| **Event Streaming** | Apache Kafka | 3.8.0 (KRaft) | Asynchronous backend event streaming & DLT |
+| **Cache & Rate Limiter** | Redis | 7.x (Alpine) | Cache-aside & distributed rate limiting |
+| **Real-Time WebSockets** | Spring WebSocket + STOMP | 4.x | Real-time browser updates |
 | **Migration Tool** | Flyway | 12.x | Schema versioning & migration truth |
 | **ORM / Data Access** | Spring Data JPA / Hibernate | 7.x | Persistence layer & entity lifecycle |
 | **Frontend** | React + Vite | 19.x / 8.x | Web client application |
